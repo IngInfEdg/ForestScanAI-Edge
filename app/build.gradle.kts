@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.forest.scanai"
-    compileSdk = 34
+    compileSdk = 35 // Actualizado a Android 15
 
     defaultConfig {
         applicationId = "com.forest.scanai"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35 // Actualizado a Android 15
         versionCode = 1
         versionName = "1.0"
 
@@ -33,6 +33,14 @@ android {
     buildFeatures {
         compose = true
     }
+    
+    // Configuración para soporte de 16 KB y alineación de librerías nativas
+    packaging {
+        jniLibs {
+            // Esto asegura que las librerías .so se extraigan alineadas y sin compresión
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
@@ -52,14 +60,13 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    implementation("com.google.ar:core:1.41.0")
-    // Usamos una versión compatible de SceneView
+    implementation("com.google.ar:core:1.46.0") // Actualizado: Versiones recientes tienen mejor soporte 16KB
     implementation("io.github.sceneview:arsceneview:0.10.0")
     
-    // Resolvemos el conflicto de namespaces de TFLite usando una versión más reciente
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
 
-    implementation("com.google.android.gms:play-services-location:21.1.0")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
     implementation("org.apache.commons:commons-math3:3.6.1")
 }
