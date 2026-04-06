@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.forest.scanai.presentation.ScanReviewViewModel
 import io.github.sceneview.SceneView
+import io.github.sceneview.math.Position
 import io.github.sceneview.node.Node
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -22,12 +23,11 @@ fun ScanReview3DScreen(
     onBack: () -> Unit
 ) {
     val result by viewModel.scanResult.collectAsState()
-    val viewMode by viewModel.viewMode.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Revisión 3D") },
+                title = { Text("Revisión de Medición") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -35,56 +35,56 @@ fun ScanReview3DScreen(
                             contentDescription = "Volver"
                         )
                     }
-                },
-                actions = {
-                    FilterChip(
-                        selected = viewMode == ScanReviewViewModel.ReviewMode.POINTS,
-                        onClick = { viewModel.setViewMode(ScanReviewViewModel.ReviewMode.POINTS) },
-                        label = { Text("Puntos") }
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    FilterChip(
-                        selected = viewMode == ScanReviewViewModel.ReviewMode.MESH,
-                        onClick = { viewModel.setViewMode(ScanReviewViewModel.ReviewMode.MESH) },
-                        label = { Text("Malla") }
-                    )
                 }
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding).background(Color.Black)) {
             result?.let { res ->
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
                         SceneView(ctx).apply {
-                            // En una implementación real de SceneView 0.10.0, 
-                            // para nubes de puntos grandes se usa PointCloud o se agregan nodos ligeros.
-                            // Por ahora agregamos nodos para validar la posición espacial.
-                            res.points.take(500).forEach { pos -> // Limitamos para fluidez en review
-                                val node = Node(engine).apply {
-                                    position = pos
-                                    // Aquí se asignaría una geometría de esfera pequeña
-                                }
-                                addChild(node)
+                            // Configuración de iluminación para evitar pantalla negra
+                            environment?.indirectLight?.let { it.intensity = 2.0f }
+                            
+                            // Posicionar cámara inicialmente
+                            if (res.points.isNotEmpty()) {
+                                val avgX = res.points.map { it.x }.average().toFloat()
+                                val avgY = res.points.map { it.y }.average().toFloat()
+                                val avgZ = res.points.map { it.z }.average().toFloat()
+                                val center = Position(avgX, avgY, avgZ)
+                                cameraNode.position = Position(center.x, center.y + 2f, center.z + 6f)
+                                cameraNode.lookAt(center)
                             }
+                        }
+                    },
+                    update = { sceneView ->
+                        // Limpiar nodos para evitar duplicados en recomposición
+                        sceneView.children.filterIsInstance<Node>().forEach { sceneView.removeChild(it) }
+                        
+                        // Renderizar una muestra de puntos (Máximo 1000)
+                        res.points.take(1000).forEach { pos ->
+                            val pointNode = Node(sceneView.engine).apply {
+                                position = pos
+                            }
+                            sceneView.addChild(pointNode)
                         }
                     }
                 )
 
-                // Panel de Métricas
+                // Panel de Calidad y Completitud
                 Card(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.Black.copy(0.7f))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        MetricText("Volumen", "${"%.2f".format(res.volume)} m³")
-                        MetricText("Largo", "${"%.2f".format(res.length)} m")
-                        MetricText("Ancho Máx", "${"%.2f".format(res.maxWidth)} m")
-                        MetricText("Altura Máx", "${"%.2f".format(res.maxHeight)} m")
-                        MetricText("Confianza", "${(res.confidence * 100).toInt()}%")
+                        Text("Estado de Cobertura", color = Color.Cyan, style = MaterialTheme.typography.labelLarge)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Color.Gray)
+                        MetricItem("Volumen", "${"%.2f".format(res.volume)} m³")
+                        MetricItem("Cobertura", "${(res.coverage * 100).toInt()}%")
+                        MetricItem("Estado", res.completeness.name)
+                        MetricItem("Trayectoria GPS", "${res.trajectory.size} pts")
                     }
                 }
             }
@@ -93,7 +93,7 @@ fun ScanReview3DScreen(
 }
 
 @Composable
-private fun MetricText(label: String, value: String) {
+private fun MetricItem(label: String, value: String) {
     Row(modifier = Modifier.padding(vertical = 2.dp)) {
         Text("$label: ", color = Color.LightGray, style = MaterialTheme.typography.labelSmall)
         Text(value, color = Color.White, style = MaterialTheme.typography.bodySmall)

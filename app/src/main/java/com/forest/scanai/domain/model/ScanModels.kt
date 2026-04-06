@@ -11,7 +11,8 @@ data class ScanUiState(
     val coveragePercentage: Float = 0f,
     val topPoints: List<Position> = emptyList(),
     val isSaving: Boolean = false,
-    val isMeasuring: Boolean = false
+    val isMeasuring: Boolean = false,
+    val error: String? = null
 )
 
 data class ScanResult(
