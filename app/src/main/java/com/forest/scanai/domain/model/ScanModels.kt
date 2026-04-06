@@ -12,7 +12,12 @@ data class ScanUiState(
     val topPoints: List<Position> = emptyList(),
     val isSaving: Boolean = false,
     val isMeasuring: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val distanceWalked: Double = 0.0,
+    val gpsPointCount: Int = 0,
+    val completeness: CompletenessLevel = CompletenessLevel.INSUFFICIENT,
+    val guidanceMessage: String = "Inicie el escaneo frente a la pila",
+    val canFinishMeasurement: Boolean = false
 )
 
 data class ScanResult(
