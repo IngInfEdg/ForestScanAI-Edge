@@ -16,11 +16,10 @@ import com.forest.scanai.domain.model.ScanSessionResult
 import com.forest.scanai.domain.model.ScanUiState
 import io.github.sceneview.math.Position
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -51,21 +50,36 @@ class ScanViewModel(
     private var gpsJob: Job? = null
 
     fun toggleMeasuring() {
-        if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
+        if (!_uiState.value.isMeasuring) {
+            startMeasurement()
+        } else {
+            stopMeasurement()
+        }
     }
 
     private fun startMeasurement() {
         reset()
-        _uiState.update { it.copy(isMeasuring = true, error = null) }
+        _uiState.update {
+            it.copy(
+                isMeasuring = true,
+                error = null,
+                guidanceMessage = "Comienza a rodear la pila manteniendo la cámara apuntando al material."
+            )
+        }
 
         gpsJob = viewModelScope.launch {
-            while (isActive) {
-                locationProvider.getCurrentLocation()?.let { loc ->
-                    if (trajectory.isEmpty() || loc.distanceTo(trajectory.last()) > 1.5f) {
+            locationProvider.locationUpdates().collectLatest { loc ->
+                if (trajectory.isEmpty()) {
+                    trajectory.add(loc)
+                } else {
+                    val last = trajectory.last()
+                    val movedEnough = loc.distanceTo(last) > 1.5f
+                    val betterAccuracy = loc.accuracy <= 25f
+                    if (movedEnough && betterAccuracy) {
                         trajectory.add(loc)
                     }
                 }
-                delay(2000)
+                refreshMeasurementState()
             }
         }
     }
@@ -119,11 +133,19 @@ class ScanViewModel(
 
         val result = calculator.calculate(points.toList())
 
+        val length = if (points.isNotEmpty()) {
+            (points.maxOf { it.x } - points.minOf { it.x }).toDouble()
+        } else 0.0
+
+        val maxWidth = if (points.isNotEmpty()) {
+            (points.maxOf { it.z } - points.minOf { it.z }).toDouble()
+        } else 0.0
+
         _finalResult.value = ScanSessionResult(
             volume = result.volume,
-            length = (points.maxOf { it.x } - points.minOf { it.x }).toDouble(),
+            length = length,
             maxHeight = result.topPoints.maxOfOrNull { it.y }?.toDouble() ?: 0.0,
-            maxWidth = (points.maxOf { it.z } - points.minOf { it.z }).toDouble(),
+            maxWidth = maxWidth,
             points = points.toList(),
             topPoints = result.topPoints,
             trajectory = trajectory.toList(),
@@ -182,11 +204,29 @@ class ScanViewModel(
         }
 
         val calcResult = calculator.calculate(points.toList())
+
         val rawDist = sqrt(
             (currentPos.x - startPos!!.x).toDouble().pow(2.0) +
-                (currentPos.z - startPos!!.z).toDouble().pow(2.0)
+                    (currentPos.z - startPos!!.z).toDouble().pow(2.0)
         ) * params.distanceCorrectionFactor
 
+        _uiState.update {
+            it.copy(
+                stereoVolume = calcResult.volume,
+                netVolume = calcResult.volume * 0.45,
+                distance = if (it.distance == 0.0) {
+                    rawDist
+                } else {
+                    it.distance + params.emaAlpha * (rawDist - it.distance)
+                },
+                topPoints = calcResult.topPoints
+            )
+        }
+
+        refreshMeasurementState()
+    }
+
+    private fun refreshMeasurementState() {
         val coverageResult = coverageEvaluator.evaluateFromObserverPath(
             observerPath = observerPath.toList(),
             pilePoints = points.toList()
@@ -213,10 +253,6 @@ class ScanViewModel(
 
         _uiState.update {
             it.copy(
-                stereoVolume = calcResult.volume,
-                netVolume = calcResult.volume * 0.45,
-                distance = if (it.distance == 0.0) rawDist else it.distance + params.emaAlpha * (rawDist - it.distance),
-                topPoints = calcResult.topPoints,
                 coveragePercentage = coverageResult.coverageRatio,
                 coveredSectors = coverageResult.coveredSectors,
                 totalSectors = coverageResult.totalSectors,
@@ -226,8 +262,8 @@ class ScanViewModel(
                 arDistanceWalked = arDistance,
                 completeness = completeness,
                 guidanceMessage = guidance,
-                canFinishMeasurement = completeness == CompletenessLevel.ACCEPTABLE || completeness == CompletenessLevel.COMPLETE,
-                error = null
+                canFinishMeasurement = completeness == CompletenessLevel.ACCEPTABLE ||
+                        completeness == CompletenessLevel.COMPLETE
             )
         }
     }
@@ -245,7 +281,7 @@ class ScanViewModel(
     private fun distanceBetween(a: Position, b: Position): Double {
         return sqrt(
             (a.x - b.x).toDouble().pow(2.0) +
-                (a.z - b.z).toDouble().pow(2.0)
+                    (a.z - b.z).toDouble().pow(2.0)
         )
     }
 
