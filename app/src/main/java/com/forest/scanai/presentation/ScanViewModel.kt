@@ -8,6 +8,7 @@ import com.forest.scanai.core.ScanParams
 import com.forest.scanai.data.location.LocationProvider
 import com.forest.scanai.domain.engine.MeasurementCompletenessValidator
 import com.forest.scanai.domain.engine.MeasurementCoverageEvaluator
+import com.forest.scanai.domain.engine.PileAxisEstimator
 import com.forest.scanai.domain.engine.PointCloudProcessor
 import com.forest.scanai.domain.engine.ScanGuidanceEngine
 import com.forest.scanai.domain.engine.VolumeCalculator
@@ -28,7 +29,8 @@ class ScanViewModel(
     private val locationProvider: LocationProvider,
     private val params: ScanParams = ScanParams(),
     private val processor: PointCloudProcessor = PointCloudProcessor(params),
-    private val calculator: VolumeCalculator = VolumeCalculator(params),
+    private val axisEstimator: PileAxisEstimator = PileAxisEstimator(),
+    private val calculator: VolumeCalculator = VolumeCalculator(params, axisEstimator),
     private val coverageEvaluator: MeasurementCoverageEvaluator = MeasurementCoverageEvaluator(),
     private val completenessValidator: MeasurementCompletenessValidator = MeasurementCompletenessValidator(),
     private val guidanceEngine: ScanGuidanceEngine = ScanGuidanceEngine()
@@ -87,9 +89,11 @@ class ScanViewModel(
     private fun stopMeasurement() {
         gpsJob?.cancel()
 
+        val currentPoints = points.toList()
+
         val coverageResult = coverageEvaluator.evaluateFromObserverPath(
             observerPath = observerPath.toList(),
-            pilePoints = points.toList()
+            pilePoints = currentPoints
         )
 
         val gpsDistance = calculateGpsDistance()
@@ -99,7 +103,7 @@ class ScanViewModel(
             angularCoverage = coverageResult.coverageRatio,
             coveredSectors = coverageResult.coveredSectors,
             observerSamples = observerPath.size,
-            usefulPointCount = points.size,
+            usefulPointCount = currentPoints.size,
             arDistanceWalked = arDistance,
             gpsDistanceWalked = gpsDistance
         )
@@ -108,7 +112,7 @@ class ScanViewModel(
             completeness = completeness,
             missingSectors = coverageResult.missingSectors,
             observerSamples = observerPath.size,
-            usefulPoints = points.size
+            usefulPoints = currentPoints.size
         )
 
         if (completeness == CompletenessLevel.INSUFFICIENT || completeness == CompletenessLevel.PARTIAL) {
@@ -131,22 +135,29 @@ class ScanViewModel(
             return
         }
 
-        val result = calculator.calculate(points.toList())
+        val result = calculator.calculate(currentPoints)
+        val axisResult = axisEstimator.estimate(currentPoints)
 
-        val length = if (points.isNotEmpty()) {
-            (points.maxOf { it.x } - points.minOf { it.x }).toDouble()
-        } else 0.0
+        val length = axisResult?.length
+            ?: if (currentPoints.isNotEmpty()) {
+                (currentPoints.maxOf { it.x } - currentPoints.minOf { it.x }).toDouble()
+            } else {
+                0.0
+            }
 
-        val maxWidth = if (points.isNotEmpty()) {
-            (points.maxOf { it.z } - points.minOf { it.z }).toDouble()
-        } else 0.0
+        val maxWidth = axisResult?.width
+            ?: if (currentPoints.isNotEmpty()) {
+                (currentPoints.maxOf { it.z } - currentPoints.minOf { it.z }).toDouble()
+            } else {
+                0.0
+            }
 
         _finalResult.value = ScanSessionResult(
             volume = result.volume,
             length = length,
             maxHeight = result.topPoints.maxOfOrNull { it.y }?.toDouble() ?: 0.0,
             maxWidth = maxWidth,
-            points = points.toList(),
+            points = currentPoints,
             topPoints = result.topPoints,
             trajectory = trajectory.toList(),
             observerPath = observerPath.toList(),
@@ -157,7 +168,7 @@ class ScanViewModel(
                 CompletenessLevel.ACCEPTABLE -> 0.80f
                 else -> 0.50f
             },
-            pointsCount = points.size,
+            pointsCount = currentPoints.size,
             arDistanceWalked = arDistance,
             gpsDistanceWalked = gpsDistance,
             gpsPointCount = trajectory.size,

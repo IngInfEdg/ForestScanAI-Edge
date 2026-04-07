@@ -3,87 +3,181 @@ package com.forest.scanai.domain.engine
 import com.forest.scanai.core.ScanParams
 import com.forest.scanai.domain.model.ScanResult
 import io.github.sceneview.math.Position
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.min
 
-class VolumeCalculator(private val params: ScanParams) {
-    
+class VolumeCalculator(
+    private val params: ScanParams,
+    private val axisEstimator: PileAxisEstimator = PileAxisEstimator()
+) {
+
     private var lastCalculatedVolume = 0.0
 
+    private data class ProjectedPoint(
+        val source: Position,
+        val along: Float,
+        val cross: Float
+    )
+
     fun calculate(points: List<Position>): ScanResult {
-        // Umbral mínimo de puntos aumentado para evitar cálculos erráticos al inicio
         if (points.size < 500) return ScanResult(0.0, emptyList())
-        
-        val minX = points.minOf { it.x }
-        val maxX = points.maxOf { it.x }
-        val length = maxX - minX
-        
-        // Si la pila es muy pequeña, no calculamos para evitar ruido
-        if (length < 0.5) return ScanResult(0.0, emptyList())
 
-        val sliceWidth = params.sliceWidth
-        val numSlices = (length / sliceWidth).toInt()
-        val sliceAreas = mutableListOf<Double>()
-        val rawTopPoints = mutableListOf<Position>()
+        val axis = axisEstimator.estimate(points) ?: return ScanResult(0.0, emptyList())
+        if (axis.length < 0.5) return ScanResult(0.0, emptyList())
 
-        for (i in 0 until numSlices) {
-            val startX = minX + i * sliceWidth
-            val pointsInSlice = points.filter { it.x in startX..(startX + sliceWidth) }
-            
-            if (pointsInSlice.size >= 15) {
-                val sortedY = pointsInSlice.map { it.y }.sorted()
-                
-                // Base de la pila: usamos el percentil 15 para evitar huecos en el terreno
-                val groundLevel = sortedY[sortedY.size / 7]
-                
-                // Cima de la pila: usamos el percentil 90 para ignorar ramas sueltas (ruido)
-                val topLevel = sortedY[(sortedY.size * 0.90).toInt()]
-                
-                val topPoint = pointsInSlice.filter { it.y >= topLevel }.maxByOrNull { it.y } ?: pointsInSlice.maxBy { it.y }
-                
-                val height = (topLevel - groundLevel).toDouble()
-                
-                if (height > params.groundMargin) {
-                    rawTopPoints.add(topPoint)
-                    
-                    // Profundidad de la pila en este slice
-                    val zMin = pointsInSlice.minOf { it.z }
-                    val zMax = pointsInSlice.maxOf { it.z }
-                    val depth = (zMax - zMin).toDouble().coerceAtMost(params.maxPileDepth)
-                    
-                    // Cálculo de área de la sección (Aproximación trapezoidal simple)
-                    sliceAreas.add(height * depth)
-                } else {
-                    sliceAreas.add(0.0)
-                    rawTopPoints.add(Position(startX + sliceWidth / 2, groundLevel, 0f))
-                }
-            } else {
-                sliceAreas.add(0.0)
-                rawTopPoints.add(Position(startX + sliceWidth / 2, 0f, 0f))
+        val projectedPoints = points.map { point ->
+            ProjectedPoint(
+                source = point,
+                along = axisEstimator.projectAlong(point, axis),
+                cross = axisEstimator.projectCross(point, axis)
+            )
+        }
+
+        val sliceWidth = params.sliceWidth.toFloat().coerceAtLeast(0.05f)
+        val totalLength = (axis.maxAlong - axis.minAlong).coerceAtLeast(0.01f)
+        val numSlices = max(1, ceil(totalLength / sliceWidth).toInt())
+
+        val sliceAreas = MutableList(numSlices) { 0.0 }
+        val topPoints = mutableListOf<Position>()
+
+        for (sliceIndex in 0 until numSlices) {
+            val startAlong = axis.minAlong + sliceIndex * sliceWidth
+            val endAlong = min(axis.maxAlong, startAlong + sliceWidth)
+            val centerAlong = (startAlong + endAlong) / 2f
+
+            val pointsInSlice = projectedPoints.filter { it.along in startAlong..endAlong }
+
+            if (pointsInSlice.size < 20) {
+                topPoints.add(axisEstimator.pointOnAxis(axis, centerAlong, 0f))
+                continue
             }
+
+            val ys = pointsInSlice.map { it.source.y }.sorted()
+            val sliceGround = percentile(ys, 0.12f)
+            val sliceTop = percentile(ys, 0.88f)
+            val sliceHeight = (sliceTop - sliceGround).toDouble()
+
+            if (sliceHeight <= params.groundMargin) {
+                topPoints.add(axisEstimator.pointOnAxis(axis, centerAlong, sliceGround))
+                continue
+            }
+
+            val crossValues = pointsInSlice.map { it.cross }.sorted()
+            val crossMin = percentile(crossValues, 0.10f)
+            val crossMax = percentile(crossValues, 0.90f)
+            val effectiveWidth = (crossMax - crossMin).toDouble().coerceAtLeast(0.0)
+
+            topPoints.add(axisEstimator.pointOnAxis(axis, centerAlong, sliceTop))
+
+            if (effectiveWidth <= 0.05) {
+                continue
+            }
+
+            val area = integrateSliceArea(
+                pointsInSlice = pointsInSlice,
+                crossMin = crossMin,
+                crossMax = crossMax,
+                fallbackHeight = sliceHeight
+            )
+
+            sliceAreas[sliceIndex] = area
         }
 
-        // Suavizado del contorno (Línea roja) para que no sea tan "nerviosa"
-        val smoothedTopPoints = rawTopPoints.mapIndexed { index, pos ->
-            if (index > 2 && index < rawTopPoints.size - 3) {
-                val avgY = (rawTopPoints[index - 3].y + rawTopPoints[index - 2].y + 
-                            rawTopPoints[index - 1].y + pos.y + 
-                            rawTopPoints[index + 1].y + rawTopPoints[index + 2].y + 
-                            rawTopPoints[index + 3].y) / 7f
-                Position(pos.x, avgY, pos.z)
-            } else pos
-        }
+        val smoothedTopPoints = smoothTopPoints(topPoints)
 
         var rawVolume = 0.0
         for (i in 0 until sliceAreas.size - 1) {
             rawVolume += ((sliceAreas[i] + sliceAreas[i + 1]) / 2.0) * sliceWidth
         }
 
-        // Aplicamos un filtro de media móvil simple (EMA) al volumen total 
-        // para evitar los saltos bruscos que viste en las fotos (ej. de 38 a 132)
-        val finalVolume = if (lastCalculatedVolume == 0.0) rawVolume 
-                          else lastCalculatedVolume + 0.05 * (rawVolume - lastCalculatedVolume)
-        
+        val finalVolume = if (lastCalculatedVolume == 0.0) {
+            rawVolume
+        } else {
+            lastCalculatedVolume + 0.05 * (rawVolume - lastCalculatedVolume)
+        }
+
         lastCalculatedVolume = finalVolume
-        
-        return ScanResult(finalVolume, smoothedTopPoints)
+
+        return ScanResult(
+            volume = finalVolume.coerceAtLeast(0.0),
+            topPoints = smoothedTopPoints
+        )
+    }
+
+    private fun integrateSliceArea(
+        pointsInSlice: List<ProjectedPoint>,
+        crossMin: Float,
+        crossMax: Float,
+        fallbackHeight: Double
+    ): Double {
+        val width = (crossMax - crossMin).toDouble()
+        if (width <= 0.0) return 0.0
+
+        val estimatedBins = ceil(width / 0.25).toInt()
+        val bins = estimatedBins.coerceIn(4, 10)
+        val binWidth = width / bins
+
+        var totalArea = 0.0
+        var contributingBins = 0
+
+        for (binIndex in 0 until bins) {
+            val binStart = crossMin + (binIndex * binWidth).toFloat()
+            val binEnd = binStart + binWidth.toFloat()
+
+            val binPoints = pointsInSlice.filter { it.cross in binStart..binEnd }
+            if (binPoints.size < 4) continue
+
+            val ys = binPoints.map { it.source.y }.sorted()
+            val ground = percentile(ys, 0.15f)
+            val top = percentile(ys, 0.85f)
+            val binHeight = (top - ground).toDouble()
+
+            if (binHeight > params.groundMargin) {
+                totalArea += binHeight * binWidth
+                contributingBins++
+            }
+        }
+
+        if (contributingBins == 0) {
+            return fallbackHeight * width * 0.65
+        }
+
+        return totalArea
+    }
+
+    private fun smoothTopPoints(points: List<Position>): List<Position> {
+        if (points.size < 7) return points
+
+        return points.mapIndexed { index, point ->
+            if (index in 3 until points.lastIndex - 2) {
+                val avgY = (
+                        points[index - 3].y +
+                                points[index - 2].y +
+                                points[index - 1].y +
+                                points[index].y +
+                                points[index + 1].y +
+                                points[index + 2].y +
+                                points[index + 3].y
+                        ) / 7f
+
+                Position(point.x, avgY, point.z)
+            } else {
+                point
+            }
+        }
+    }
+
+    private fun percentile(sorted: List<Float>, q: Float): Float {
+        if (sorted.isEmpty()) return 0f
+        if (sorted.size == 1) return sorted.first()
+
+        val clampedQ = q.coerceIn(0f, 1f)
+        val index = clampedQ * sorted.lastIndex
+        val lower = index.toInt()
+        val upper = min(lower + 1, sorted.lastIndex)
+        val weight = index - lower
+
+        return sorted[lower] * (1f - weight) + sorted[upper] * weight
     }
 }
