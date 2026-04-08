@@ -9,11 +9,16 @@ import com.forest.scanai.core.ScanParams
 import com.forest.scanai.data.location.LocationProvider
 import com.forest.scanai.domain.engine.MeasurementCompletenessValidator
 import com.forest.scanai.domain.engine.MeasurementCoverageEvaluator
+import com.forest.scanai.domain.engine.MeasurementStateEvaluator
+import com.forest.scanai.domain.engine.MeasurementStateInput
 import com.forest.scanai.domain.engine.PileAxisEstimator
 import com.forest.scanai.domain.engine.PileCoverageQualityEvaluator
 import com.forest.scanai.domain.engine.PileCoverageQualityLevel
 import com.forest.scanai.domain.engine.PointCloudProcessor
 import com.forest.scanai.domain.engine.ScanGuidanceEngine
+import com.forest.scanai.domain.engine.TrajectoryQualityEvaluator
+import com.forest.scanai.domain.engine.VerticalCoverageEvaluator
+import com.forest.scanai.domain.engine.VolumeStabilityEvaluator
 import com.forest.scanai.domain.engine.VolumeCalculator
 import com.forest.scanai.domain.model.CompletenessLevel
 import com.forest.scanai.domain.model.ScanSessionResult
@@ -37,6 +42,10 @@ class ScanViewModel(
     private val coverageEvaluator: MeasurementCoverageEvaluator = MeasurementCoverageEvaluator(),
     private val pileCoverageQualityEvaluator: PileCoverageQualityEvaluator =
         PileCoverageQualityEvaluator(axisEstimator),
+    private val trajectoryQualityEvaluator: TrajectoryQualityEvaluator = TrajectoryQualityEvaluator(),
+    private val verticalCoverageEvaluator: VerticalCoverageEvaluator = VerticalCoverageEvaluator(),
+    private val volumeStabilityEvaluator: VolumeStabilityEvaluator = VolumeStabilityEvaluator(),
+    private val stateEvaluator: MeasurementStateEvaluator = MeasurementStateEvaluator(),
     private val completenessValidator: MeasurementCompletenessValidator =
         MeasurementCompletenessValidator(),
     private val guidanceEngine: ScanGuidanceEngine = ScanGuidanceEngine()
@@ -54,6 +63,7 @@ class ScanViewModel(
     private val voxelGrid = mutableSetOf<String>()
     private val trajectory = mutableStateListOf<Location>()
     private val observerPath = mutableStateListOf<Position>()
+    private val volumeHistory = ArrayDeque<Double>()
 
     private var startPos: Position? = null
     private var gpsJob: Job? = null
@@ -102,6 +112,12 @@ class ScanViewModel(
             observerPath = observerPath.toList(),
             pilePoints = currentPoints
         )
+        val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
+        val verticalCoverage = verticalCoverageEvaluator.evaluate(
+            pilePoints = currentPoints,
+            observerPath = observerPath.toList()
+        )
+        val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
 
         val gpsDistance = calculateGpsDistance()
         val arDistance = calculateArDistance()
@@ -114,15 +130,35 @@ class ScanViewModel(
             arDistanceWalked = arDistance,
             gpsDistanceWalked = gpsDistance
         )
+        val stateDecision = stateEvaluator.evaluate(
+            MeasurementStateInput(
+                baseCompleteness = completeness,
+                trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
+                verticalCoverageScore = verticalCoverage.verticalCoverageScore,
+                weakVerticalBands = verticalCoverage.weakBands.size,
+                supportsAcceptableVertical = verticalCoverage.supportsAcceptable,
+                hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
+                isVolumeStable = volumeStability.isStable
+            )
+        )
+        val gatedCompleteness = stateDecision.completeness
 
         val guidance = guidanceEngine.buildMessage(
-            completeness = completeness,
+            completeness = gatedCompleteness,
             missingSectors = coverageResult.missingSectors,
             observerSamples = observerPath.size,
             usefulPoints = currentPoints.size
         )
 
-        if (completeness == CompletenessLevel.INSUFFICIENT || completeness == CompletenessLevel.PARTIAL) {
+        val gatedGuidance = buildString {
+            append(guidance)
+            verticalCoverage.reasons.forEach { append(" $it") }
+            trajectoryQuality.penaltyReasons.forEach { append(" $it") }
+            stateDecision.blockers.forEach { append(" $it") }
+            volumeStability.reasons.forEach { append(" $it") }
+        }.trim()
+
+        if (gatedCompleteness == CompletenessLevel.INSUFFICIENT || gatedCompleteness == CompletenessLevel.PARTIAL) {
             _uiState.update {
                 it.copy(
                     isMeasuring = false,
@@ -133,10 +169,10 @@ class ScanViewModel(
                     observerSampleCount = observerPath.size,
                     gpsDistanceWalked = gpsDistance,
                     arDistanceWalked = arDistance,
-                    completeness = completeness,
-                    guidanceMessage = guidance,
+                    completeness = gatedCompleteness,
+                    guidanceMessage = gatedGuidance,
                     canFinishMeasurement = false,
-                    error = "Medición incompleta. $guidance"
+                    error = "Medición incompleta. $gatedGuidance"
                 )
             }
             return
@@ -181,9 +217,10 @@ class ScanViewModel(
 
             else -> completeness
         }
+        val finalCompleteness = stateDecision.completeness.capAt(adjustedCompleteness)
 
         val adjustedGuidance = buildString {
-            append(guidance)
+            append(gatedGuidance)
 
             if (cloudQuality != null) {
                 if (!cloudQuality.edgeCoverageStart || !cloudQuality.edgeCoverageEnd) {
@@ -215,7 +252,7 @@ class ScanViewModel(
             }
 
         val finalConfidence = (
-                when (adjustedCompleteness) {
+                when (finalCompleteness) {
                     CompletenessLevel.COMPLETE -> 0.95f
                     CompletenessLevel.ACCEPTABLE -> 0.80f
                     CompletenessLevel.PARTIAL -> 0.60f
@@ -236,7 +273,7 @@ class ScanViewModel(
             observerPath = observerPath.toList(),
 
             coverage = coverageResult.coverageRatio,
-            completeness = adjustedCompleteness,
+            completeness = finalCompleteness,
             confidence = finalConfidence,
 
             pointsCount = currentPoints.size,
@@ -274,10 +311,9 @@ class ScanViewModel(
                 observerSampleCount = observerPath.size,
                 gpsDistanceWalked = gpsDistance,
                 arDistanceWalked = arDistance,
-                completeness = adjustedCompleteness,
+                completeness = finalCompleteness,
                 guidanceMessage = adjustedGuidance,
-                canFinishMeasurement = adjustedCompleteness == CompletenessLevel.ACCEPTABLE ||
-                        adjustedCompleteness == CompletenessLevel.COMPLETE,
+                canFinishMeasurement = stateDecision.canFinish,
                 error = null
             )
         }
@@ -320,6 +356,10 @@ class ScanViewModel(
                 topPoints = calcResult.topPoints
             )
         }
+        volumeHistory.addLast(calcResult.volume)
+        if (volumeHistory.size > 20) {
+            volumeHistory.removeFirst()
+        }
 
         refreshMeasurementState()
     }
@@ -343,28 +383,45 @@ class ScanViewModel(
             arDistanceWalked = arDistance,
             gpsDistanceWalked = gpsDistance
         )
+        val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
+        val verticalCoverage = verticalCoverageEvaluator.evaluate(
+            pilePoints = currentPoints,
+            observerPath = observerPath.toList()
+        )
+        val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
 
         val cloudQuality = pileCoverageQualityEvaluator.evaluate(currentPoints)
+        val stateDecision = stateEvaluator.evaluate(
+            MeasurementStateInput(
+                baseCompleteness = baseCompleteness,
+                trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
+                verticalCoverageScore = verticalCoverage.verticalCoverageScore,
+                weakVerticalBands = verticalCoverage.weakBands.size,
+                supportsAcceptableVertical = verticalCoverage.supportsAcceptable,
+                hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
+                isVolumeStable = volumeStability.isStable
+            )
+        )
 
         val adjustedCompleteness = when {
-            cloudQuality == null -> baseCompleteness
+            cloudQuality == null -> stateDecision.completeness
 
-            baseCompleteness == CompletenessLevel.COMPLETE &&
+            stateDecision.completeness == CompletenessLevel.COMPLETE &&
                     cloudQuality.qualityLevel != PileCoverageQualityLevel.COMPLETE -> {
                 CompletenessLevel.ACCEPTABLE
             }
 
-            baseCompleteness == CompletenessLevel.ACCEPTABLE &&
+            stateDecision.completeness == CompletenessLevel.ACCEPTABLE &&
                     cloudQuality.qualityLevel == PileCoverageQualityLevel.POOR -> {
                 CompletenessLevel.PARTIAL
             }
 
-            baseCompleteness == CompletenessLevel.COMPLETE &&
+            stateDecision.completeness == CompletenessLevel.COMPLETE &&
                     cloudQuality.qualityLevel == PileCoverageQualityLevel.FAIR -> {
                 CompletenessLevel.PARTIAL
             }
 
-            else -> baseCompleteness
+            else -> stateDecision.completeness
         }
 
         val guidance = guidanceEngine.buildMessage(
@@ -376,6 +433,10 @@ class ScanViewModel(
 
         val adjustedGuidance = buildString {
             append(guidance)
+            verticalCoverage.reasons.forEach { append(" $it") }
+            trajectoryQuality.penaltyReasons.forEach { append(" $it") }
+            stateDecision.blockers.forEach { append(" $it") }
+            volumeStability.reasons.forEach { append(" $it") }
 
             if (cloudQuality != null) {
                 if (!cloudQuality.edgeCoverageStart || !cloudQuality.edgeCoverageEnd) {
@@ -403,8 +464,8 @@ class ScanViewModel(
                 arDistanceWalked = arDistance,
                 completeness = adjustedCompleteness,
                 guidanceMessage = adjustedGuidance,
-                canFinishMeasurement = adjustedCompleteness == CompletenessLevel.ACCEPTABLE ||
-                        adjustedCompleteness == CompletenessLevel.COMPLETE
+                canFinishMeasurement = stateDecision.canFinish &&
+                    (adjustedCompleteness == CompletenessLevel.ACCEPTABLE || adjustedCompleteness == CompletenessLevel.COMPLETE)
             )
         }
     }
@@ -431,9 +492,14 @@ class ScanViewModel(
         voxelGrid.clear()
         trajectory.clear()
         observerPath.clear()
+        volumeHistory.clear()
         startPos = null
         gpsJob?.cancel()
         _uiState.value = ScanUiState()
         _finalResult.value = null
+    }
+
+    private fun CompletenessLevel.capAt(maximum: CompletenessLevel): CompletenessLevel {
+        return if (this.ordinal > maximum.ordinal) maximum else this
     }
 }
