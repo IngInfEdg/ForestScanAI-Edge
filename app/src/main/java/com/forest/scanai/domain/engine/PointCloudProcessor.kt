@@ -2,6 +2,7 @@ package com.forest.scanai.domain.engine
 
 import com.forest.scanai.core.ScanParams
 import com.google.ar.core.Frame
+import android.util.Log
 import io.github.sceneview.math.Position
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -14,14 +15,14 @@ class PointCloudProcessor(private val params: ScanParams) {
         voxelGrid: MutableSet<String>
     ): List<Position> {
         val filteredPoints = mutableListOf<Position>()
+        var pointCloud: com.google.ar.core.PointCloud? = null
 
         try {
-            val pointCloud = frame.acquirePointCloud()
+            pointCloud = frame.acquirePointCloud()
             val buffer = pointCloud.points
             val count = buffer.remaining() / 4
 
             if (count <= 0) {
-                pointCloud.release()
                 return emptyList()
             }
 
@@ -64,9 +65,12 @@ class PointCloudProcessor(private val params: ScanParams) {
                 val verticalDelta = y - cameraPos.y
                 val absVerticalDelta = abs(verticalDelta)
 
-                if (horizontalDistance < minDistance.toFloat() || horizontalDistance > maxDistance.toFloat())
-
-                    if (spatialDistance < minDistance.toFloat() || spatialDistance > (maxDistance + 1.0).toFloat())
+                if (horizontalDistance < minDistance.toFloat() || horizontalDistance > maxDistance.toFloat()) {
+                    continue
+                }
+                if (spatialDistance < minDistance.toFloat() || spatialDistance > (maxDistance + 1.0).toFloat()) {
+                    continue
+                }
 
                 if (absVerticalDelta > 3.5f) {
                     continue
@@ -89,9 +93,10 @@ class PointCloudProcessor(private val params: ScanParams) {
                     filteredPoints.add(Position(x, y, z))
                 }
             }
-
-            pointCloud.release()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("PointCloudProcessor", "Failed to extract AR points: ${e.message}")
+        } finally {
+            pointCloud?.release()
         }
 
         return filteredPoints
