@@ -351,4 +351,4 @@ private fun ResultOverlay(
 
 private fun formatDouble(value: Double): String {
     return String.format(Locale.US, "%.2f", value)
-}
+}// TODO: Mejora medición AR - ajuste precisión
