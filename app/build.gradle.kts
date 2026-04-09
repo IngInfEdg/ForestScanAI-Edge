@@ -1,9 +1,10 @@
 plugins {
     alias(libs.plugins.android.application)
+    id("org.jetbrains.kotlin.android")
     alias(libs.plugins.kotlin.compose)
 }
-
 android {
+
     namespace = "com.forest.scanai"
     compileSdk = 35
 
@@ -27,8 +28,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         compose = true
@@ -39,6 +40,9 @@ android {
             // Requerido para compatibilidad con páginas de 16 KB en Android 15
             useLegacyPackaging = false
         }
+    }
+    kotlinOptions {
+        jvmTarget = "17"
     }
 }
 
