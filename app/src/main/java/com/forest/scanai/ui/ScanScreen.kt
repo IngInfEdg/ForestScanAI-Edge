@@ -37,6 +37,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.forest.scanai.core.projectPointToScreen
 import com.forest.scanai.domain.model.ScanSessionResult
 import com.forest.scanai.domain.model.ScanUiState
+import androidx.compose.ui.text.font.FontWeight
 import com.forest.scanai.presentation.ScanViewModel
 import com.forest.scanai.presentation.components.MeasurementCompactCard
 import com.forest.scanai.presentation.components.SegmentedPile3DView
@@ -48,7 +49,7 @@ import java.util.Locale
 @Composable
 fun ScanScreen(
     viewModel: ScanViewModel,
-    onSaveReport: (ScanUiState) -> Unit
+    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val finalResult by viewModel.finalResult.collectAsState()
@@ -152,10 +153,17 @@ fun ScanScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
+                .padding(bottom = 20.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Text(
+                text = uiState.appVersionDisplay,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
             if (uiState.error != null && finalResult == null) {
                 Surface(
                     color = Color.Red.copy(alpha = 0.8f),
@@ -196,7 +204,7 @@ fun ScanScreen(
                         }
 
                         Button(
-                            onClick = { onSaveReport(uiState) },
+                            onClick = { onSaveReport(uiState, finalResult) },
                             enabled = uiState.stereoVolume > 0,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                         ) {
@@ -239,7 +247,7 @@ fun ScanScreen(
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Button(
-                        onClick = { onSaveReport(uiState) },
+                        onClick = { onSaveReport(uiState, finalResult) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                     ) {
                         Text("Guardar CSV")

@@ -22,7 +22,8 @@ data class ScanUiState(
     val totalSectors: Int = 12,
     val completeness: CompletenessLevel = CompletenessLevel.INSUFFICIENT,
     val guidanceMessage: String = "Inicia el recorrido alrededor de la pila.",
-    val canFinishMeasurement: Boolean = false
+    val canFinishMeasurement: Boolean = false,
+    val appVersionDisplay: String = ""
 )
 
 data class ScanResult(
