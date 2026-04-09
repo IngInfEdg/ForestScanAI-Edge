@@ -1,13 +1,26 @@
 package com.forest.scanai.domain.engine
 
+import android.util.Log
 import com.forest.scanai.core.ScanParams
 import com.google.ar.core.Frame
-import android.util.Log
 import io.github.sceneview.math.Position
 import kotlin.math.abs
 import kotlin.math.sqrt
 
+data class PointCloudExtractionStats(
+    val rawPoints: Int,
+    val sampledPoints: Int,
+    val acceptedPoints: Int,
+    val rejectedByConfidence: Int,
+    val rejectedByDistance: Int,
+    val rejectedByVerticalGate: Int,
+    val rejectedByNoiseGate: Int
+)
+
 class PointCloudProcessor(private val params: ScanParams) {
+
+    var lastStats: PointCloudExtractionStats = PointCloudExtractionStats(0, 0, 0, 0, 0, 0, 0)
+        private set
 
     fun extractFilteredPoints(
         frame: Frame,
@@ -17,27 +30,35 @@ class PointCloudProcessor(private val params: ScanParams) {
         val filteredPoints = mutableListOf<Position>()
         var pointCloud: com.google.ar.core.PointCloud? = null
 
+        var sampled = 0
+        var rejectedConfidence = 0
+        var rejectedDistance = 0
+        var rejectedVertical = 0
+        var rejectedNoise = 0
+
         try {
             pointCloud = frame.acquirePointCloud()
             val buffer = pointCloud.points
             val count = buffer.remaining() / 4
 
             if (count <= 0) {
+                lastStats = PointCloudExtractionStats(0, 0, 0, 0, 0, 0, 0)
                 return emptyList()
             }
 
             val dynamicStep = when {
-                count > 4000 -> 6
-                count > 2500 -> 4
-                count > 1200 -> 3
+                count > 6000 -> 6
+                count > 3500 -> 4
+                count > 1800 -> 3
                 else -> 2
             }
 
-            val effectiveVoxel = params.voxelSize.coerceAtMost(0.08f)
-            val minDistance = params.minDepth.coerceAtLeast(0.45)
-            val maxDistance = params.maxDepth.coerceAtMost(5.5)
+            val effectiveVoxel = params.voxelSize.coerceAtMost(0.10f)
+            val minDistance = params.minDepth.coerceAtLeast(0.35)
+            val maxDistance = params.maxDepth.coerceAtMost(6.5)
 
             for (i in 0 until count step dynamicStep) {
+                sampled++
                 val base = i * 4
                 if (base + 3 >= buffer.limit()) break
 
@@ -50,7 +71,8 @@ class PointCloudProcessor(private val params: ScanParams) {
                     continue
                 }
 
-                if (confidence < params.confidenceThreshold) {
+                if (confidence < (params.confidenceThreshold * 0.85f)) {
+                    rejectedConfidence++
                     continue
                 }
 
@@ -58,7 +80,6 @@ class PointCloudProcessor(private val params: ScanParams) {
                 val dy = y - cameraPos.y
                 val dz = z - cameraPos.z
 
-                // 🔧 CORREGIDO: usar Double en sqrt
                 val horizontalDistance = sqrt((dx * dx + dz * dz).toDouble()).toFloat()
                 val spatialDistance = sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
 
@@ -66,21 +87,22 @@ class PointCloudProcessor(private val params: ScanParams) {
                 val absVerticalDelta = abs(verticalDelta)
 
                 if (horizontalDistance < minDistance.toFloat() || horizontalDistance > maxDistance.toFloat()) {
+                    rejectedDistance++
                     continue
                 }
-                if (spatialDistance < minDistance.toFloat() || spatialDistance > (maxDistance + 1.0).toFloat()) {
-                    continue
-                }
-
-                if (absVerticalDelta > 3.5f) {
-                    continue
-                }
-
-                if (horizontalDistance > 3.8f && confidence < 0.5f) {
+                if (spatialDistance < minDistance.toFloat() || spatialDistance > (maxDistance + 1.5).toFloat()) {
+                    rejectedDistance++
                     continue
                 }
 
-                if (absVerticalDelta < 0.03f && horizontalDistance > 1.2f) {
+                // Menos agresivo para conservar corona/base y delegar limpieza a la segmentación.
+                if (absVerticalDelta > 4.5f) {
+                    rejectedVertical++
+                    continue
+                }
+
+                if (horizontalDistance > 5.0f && confidence < 0.45f) {
+                    rejectedNoise++
                     continue
                 }
 
@@ -93,6 +115,16 @@ class PointCloudProcessor(private val params: ScanParams) {
                     filteredPoints.add(Position(x, y, z))
                 }
             }
+
+            lastStats = PointCloudExtractionStats(
+                rawPoints = count,
+                sampledPoints = sampled,
+                acceptedPoints = filteredPoints.size,
+                rejectedByConfidence = rejectedConfidence,
+                rejectedByDistance = rejectedDistance,
+                rejectedByVerticalGate = rejectedVertical,
+                rejectedByNoiseGate = rejectedNoise
+            )
         } catch (e: Exception) {
             Log.w("PointCloudProcessor", "Failed to extract AR points: ${e.message}")
         } finally {

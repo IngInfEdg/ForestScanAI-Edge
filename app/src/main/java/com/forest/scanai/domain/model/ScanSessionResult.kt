@@ -47,5 +47,14 @@ data class ScanSessionResult(
     val reviewModelHeight: Float = 0f,
     val reviewModelDepth: Float = 0f,
 
+    val pileDetectionConfidence: Float = 0f,
+    val pileDetectionQuality: String = "FALLBACK",
+    val pileDetectionReasons: List<String> = emptyList(),
+    val detectionDebugInfo: Map<String, String> = emptyMap(),
+
+    val appVersionName: String = "",
+    val appVersionCode: Long = 0,
+    val appVersionDisplay: String = "",
+
     val timestamp: Long = System.currentTimeMillis()
 )

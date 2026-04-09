@@ -20,8 +20,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import com.forest.scanai.core.AppVersionProvider
 import com.forest.scanai.data.export.CsvExporter
 import com.forest.scanai.data.location.LocationProvider
+import com.forest.scanai.domain.model.ScanSessionResult
+import com.forest.scanai.domain.model.ScanUiState
 import com.forest.scanai.presentation.ScanReviewViewModel
 import com.forest.scanai.presentation.ScanViewModel
 import com.forest.scanai.ui.ScanReview3DScreen
@@ -30,19 +33,25 @@ import com.forest.scanai.ui.theme.ForestScanAITheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    
+
     private val locationProvider by lazy { LocationProvider(applicationContext) }
     private val csvExporter by lazy { CsvExporter(applicationContext) }
+    private val appVersionProvider by lazy { AppVersionProvider(applicationContext) }
 
     private val viewModel: ScanViewModel by viewModels {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return ScanViewModel(locationProvider) as T
+                return ScanViewModel(
+                    locationProvider = locationProvider,
+                    appVersionName = appVersionProvider.versionName,
+                    appVersionCode = appVersionProvider.versionCode,
+                    appVersionDisplay = appVersionProvider.displayVersion
+                ) as T
             }
         }
     }
-    
+
     private val reviewViewModel: ScanReviewViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,13 +73,15 @@ class MainActivity : ComponentActivity() {
                     currentScreen = currentScreen,
                     viewModel = viewModel,
                     reviewViewModel = reviewViewModel,
-                    onSaveReport = { uiState ->
+                    onSaveReport = { uiState, result ->
                         lifecycleScope.launch {
                             val location = locationProvider.getCurrentLocation()
                             val path = csvExporter.saveReport(
-                                uiState,
-                                location?.latitude ?: 0.0,
-                                location?.longitude ?: 0.0
+                                uiState = uiState,
+                                result = result,
+                                appVersionDisplay = appVersionProvider.displayVersion,
+                                lat = location?.latitude ?: 0.0,
+                                lon = location?.longitude ?: 0.0
                             )
                             if (path != null) {
                                 Toast.makeText(this@MainActivity, "Reporte guardado", Toast.LENGTH_LONG).show()
@@ -92,7 +103,7 @@ fun MainScreen(
     currentScreen: String,
     viewModel: ScanViewModel,
     reviewViewModel: ScanReviewViewModel,
-    onSaveReport: (com.forest.scanai.domain.model.ScanUiState) -> Unit,
+    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit,
     onBackToScan: () -> Unit
 ) {
     val context = LocalContext.current
@@ -101,11 +112,13 @@ fun MainScreen(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
     )
-    
+
     var permissionsGranted by remember {
-        mutableStateOf(permissions.all { 
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
-        })
+        mutableStateOf(
+            permissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+        )
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -120,7 +133,7 @@ fun MainScreen(
     }
 
     if (permissionsGranted) {
-        when(currentScreen) {
+        when (currentScreen) {
             "scan" -> ScanScreen(viewModel, onSaveReport)
             "review" -> ScanReview3DScreen(reviewViewModel, onBack = onBackToScan)
         }
