@@ -16,12 +16,21 @@ class MeasurementStateEvaluatorTest {
         val decision = evaluator.evaluate(
             MeasurementStateInput(
                 baseCompleteness = CompletenessLevel.COMPLETE,
+                coverageRatio = 0.93f,
+                coveredSectors = 11,
+                observerSamples = 42,
+                usefulPointCount = 2100,
                 trajectoryQualityScore = 0.82f,
+                hasTrajectoryInstability = false,
                 verticalCoverageScore = 0.52f,
                 weakVerticalBands = 2,
+                missingLowerBand = false,
+                missingUpperBand = true,
                 supportsAcceptableVertical = false,
                 hasStrongMiddleConcentration = true,
-                isVolumeStable = true
+                isVolumeStable = true,
+                hasUsableDetection = true,
+                hasReviewableModel = true
             )
         )
 
@@ -40,12 +49,21 @@ class MeasurementStateEvaluatorTest {
         val decision = evaluator.evaluate(
             MeasurementStateInput(
                 baseCompleteness = CompletenessLevel.COMPLETE,
+                coverageRatio = 0.95f,
+                coveredSectors = 12,
+                observerSamples = 48,
+                usefulPointCount = 2500,
                 trajectoryQualityScore = 0.9f,
+                hasTrajectoryInstability = false,
                 verticalCoverageScore = 0.85f,
                 weakVerticalBands = 0,
+                missingLowerBand = false,
+                missingUpperBand = false,
                 supportsAcceptableVertical = true,
                 hasStrongMiddleConcentration = false,
-                isVolumeStable = stability.isStable
+                isVolumeStable = stability.isStable,
+                hasUsableDetection = true,
+                hasReviewableModel = true
             )
         )
 

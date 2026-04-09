@@ -1,15 +1,21 @@
 package com.forest.scanai.presentation.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -24,6 +30,7 @@ fun MeasurementCompactCard(
     uiState: ScanUiState,
     modifier: Modifier = Modifier
 ) {
+    var showDiagnostics by remember { mutableStateOf(false) }
     val stateColor = when (uiState.completeness) {
         CompletenessLevel.COMPLETE -> Color(0xFF4CAF50)
         CompletenessLevel.ACCEPTABLE -> Color(0xFFFFC107)
@@ -73,16 +80,10 @@ fun MeasurementCompactCard(
         }
 
         Text(
-            text = "Cobertura: ${formatPercent(uiState.coveragePercentage)}%  •  Sectores: ${uiState.coveredSectors}/${uiState.totalSectors}",
+            text = "Cobertura: ${formatPercent(uiState.coveragePercentage)}%",
             color = Color(0xFF00E5FF),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold
-        )
-
-        Text(
-            text = "Recorrido AR: ${formatDistance(uiState.arDistanceWalked)} m",
-            color = Color.White,
-            style = MaterialTheme.typography.bodyMedium
         )
 
         Text(
@@ -93,10 +94,28 @@ fun MeasurementCompactCard(
         )
 
         Text(
-            text = "Guía: ${uiState.guidanceMessage.ifBlank { "Rodea la pila para iniciar la medición." }}",
+            text = uiState.shortGuidanceMessage.ifBlank { "Rodea la pila para iniciar la medición." },
             color = Color.White,
             style = MaterialTheme.typography.bodyMedium
         )
+
+        HorizontalDivider(color = Color.Gray.copy(alpha = 0.45f))
+        Text(
+            text = if (showDiagnostics) "Ocultar diagnóstico" else "Ver diagnóstico",
+            color = Color(0xFF90CAF9),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.clickable { showDiagnostics = !showDiagnostics }
+        )
+
+        if (showDiagnostics) {
+            uiState.diagnostics.forEach { detail ->
+                Text(
+                    text = "• $detail",
+                    color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
     }
 }
 
@@ -131,10 +150,6 @@ private fun completenessText(level: CompletenessLevel): String {
 
 private fun formatVolume(value: Double): String {
     return String.format(Locale.US, "%.2f", value)
-}
-
-private fun formatDistance(value: Double): String {
-    return String.format(Locale.US, "%.1f", value)
 }
 
 private fun formatPercent(value: Float): String {
