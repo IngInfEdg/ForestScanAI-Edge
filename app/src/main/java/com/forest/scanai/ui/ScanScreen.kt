@@ -49,11 +49,16 @@ import java.util.Locale
 @Composable
 fun ScanScreen(
     viewModel: ScanViewModel,
-    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
+    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit,
+    onOpenReview: (ScanSessionResult) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val finalResult by viewModel.finalResult.collectAsState()
     val points = viewModel.points
+    val visualPoints = remember(points.size) {
+        val maxVisualPoints = 2200
+        if (points.size <= maxVisualPoints) points.toList() else points.takeLast(maxVisualPoints)
+    }
     var viewMatrix by remember { mutableStateOf(FloatArray(16)) }
     var projMatrix by remember { mutableStateOf(FloatArray(16)) }
 
@@ -89,7 +94,7 @@ fun ScanScreen(
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (uiState.trackingState == TrackingState.TRACKING && finalResult == null) {
-                points.forEach { pos ->
+                visualPoints.forEach { pos ->
                     projectPointToScreen(
                         pos,
                         viewMatrix,
@@ -237,15 +242,56 @@ fun ScanScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Button(
-                        onClick = { viewModel.reset() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
-                    ) {
-                        Text("Cancelar")
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (uiState.canReviewMeasurement && !uiState.canFinishMeasurement) {
+                            Button(
+                                onClick = { viewModel.toggleMeasuring() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))
+                            ) {
+                                Text("Detener para revisión")
+                            }
+                        }
+
+                        Button(
+                            onClick = { viewModel.reset() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                        ) {
+                            Text("Cancelar")
+                        }
                     }
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (!uiState.canFinishMeasurement) {
+                    Text(
+                        text = "Lista para revisión. Requiere validación antes de finalizar.",
+                        color = Color(0xFFFFF59D),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (uiState.canFinishMeasurement) {
+                        Button(
+                            onClick = { finalResult?.let(onOpenReview) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                        ) {
+                            Text("Finalizar medición")
+                        }
+                    } else {
+                        Button(
+                            onClick = { onSaveReport(uiState, finalResult) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))
+                        ) {
+                            Text("Guardar revisión")
+                        }
+
+                        Button(
+                            onClick = { finalResult?.let(onOpenReview) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
+                        ) {
+                            Text("Ver modelo 3D")
+                        }
+                    }
                     Button(
                         onClick = { onSaveReport(uiState, finalResult) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))

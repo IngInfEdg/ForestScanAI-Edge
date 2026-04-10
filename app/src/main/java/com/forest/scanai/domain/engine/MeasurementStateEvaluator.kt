@@ -49,9 +49,32 @@ class MeasurementStateEvaluator(
             level = CompletenessLevel.PARTIAL
         }
 
+        val canFinish = level == CompletenessLevel.ACCEPTABLE || level == CompletenessLevel.COMPLETE
+        val hasCoverageForReview = input.coverageRatio >= 0.85f || input.coveredSectors >= 10
+        val hasSamplingForReview = input.observerSamples >= 18 && input.usefulPointCount >= 600
+        val hasModelForReview = input.hasReviewableModel || input.usefulPointCount >= 900
+        val canReview = canFinish || (
+            hasCoverageForReview &&
+                hasSamplingForReview &&
+                hasModelForReview &&
+                input.hasUsableDetection
+            )
+
+        val shortGuidance = when {
+            input.missingLowerBand -> "Falta capturar mejor la base."
+            input.missingUpperBand -> "Falta capturar mejor la parte superior."
+            input.hasTrajectoryInstability -> "Recorrido con saltos; mueve el celular más parejo."
+            canFinish -> "Medición completa. Ya puedes finalizar."
+            canReview -> "Medición lista para revisión."
+            input.coverageRatio >= 0.85f && input.weakVerticalBands > 0 -> "Cobertura suficiente, pero falta altura."
+            else -> "Aún falta cobertura para revisión."
+        }
+
         return MeasurementStateDecision(
             completeness = level,
-            canFinish = level == CompletenessLevel.ACCEPTABLE || level == CompletenessLevel.COMPLETE,
+            canReview = canReview,
+            canFinish = canFinish,
+            shortGuidance = shortGuidance,
             blockers = blockers.distinct()
         )
     }
@@ -63,17 +86,28 @@ class MeasurementStateEvaluator(
 
 data class MeasurementStateInput(
     val baseCompleteness: CompletenessLevel,
+    val coverageRatio: Float,
+    val coveredSectors: Int,
+    val observerSamples: Int,
+    val usefulPointCount: Int,
     val trajectoryQualityScore: Float,
+    val hasTrajectoryInstability: Boolean,
     val verticalCoverageScore: Float,
     val weakVerticalBands: Int,
+    val missingLowerBand: Boolean,
+    val missingUpperBand: Boolean,
     val supportsAcceptableVertical: Boolean,
     val hasStrongMiddleConcentration: Boolean,
-    val isVolumeStable: Boolean
+    val isVolumeStable: Boolean,
+    val hasUsableDetection: Boolean,
+    val hasReviewableModel: Boolean
 )
 
 data class MeasurementStateDecision(
     val completeness: CompletenessLevel,
+    val canReview: Boolean,
     val canFinish: Boolean,
+    val shortGuidance: String,
     val blockers: List<String>
 )
 

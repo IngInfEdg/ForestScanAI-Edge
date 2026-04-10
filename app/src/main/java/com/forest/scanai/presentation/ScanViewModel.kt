@@ -21,8 +21,10 @@ import com.forest.scanai.domain.engine.PointCloudReviewModelBuilder
 import com.forest.scanai.domain.engine.ScanGuidanceEngine
 import com.forest.scanai.domain.engine.TrajectoryQualityEvaluator
 import com.forest.scanai.domain.engine.VerticalCoverageEvaluator
+import com.forest.scanai.domain.engine.VerticalCoveragePenalty
 import com.forest.scanai.domain.engine.VolumeCalculator
 import com.forest.scanai.domain.engine.VolumeStabilityEvaluator
+import com.forest.scanai.domain.engine.TrajectoryPenalty
 import com.forest.scanai.domain.model.CompletenessLevel
 import com.forest.scanai.domain.model.ScanSessionResult
 import com.forest.scanai.domain.model.ScanUiState
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.os.SystemClock
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -79,6 +82,9 @@ class ScanViewModel(
     private var lastDetection = pileObjectDetector.detect(emptyList())
     private var lastDetectionPointCount = 0
     private var lastDetectionObserverCount = 0
+    private var lastStateRefreshAtMs = 0L
+    private var lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
+    private var frameCounter = 0
 
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
@@ -102,7 +108,7 @@ class ScanViewModel(
                     val last = trajectory.last()
                     if (loc.distanceTo(last) > 1.5f && loc.accuracy <= 25f) trajectory.add(loc)
                 }
-                refreshMeasurementState()
+                refreshMeasurementState(force = true)
             }
         }
     }
@@ -149,12 +155,21 @@ class ScanViewModel(
         val stateDecision = stateEvaluator.evaluate(
             MeasurementStateInput(
                 baseCompleteness = completeness,
+                coverageRatio = coverageResult.coverageRatio,
+                coveredSectors = coverageResult.coveredSectors,
+                observerSamples = observerPath.size,
+                usefulPointCount = refinedPilePoints.size,
                 trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
+                hasTrajectoryInstability = TrajectoryPenalty.LOW_KINEMATIC_CONSISTENCY in trajectoryQuality.penaltyFlags,
                 verticalCoverageScore = verticalCoverage.verticalCoverageScore,
                 weakVerticalBands = verticalCoverage.weakBands.size,
+                missingLowerBand = VerticalCoveragePenalty.MISSING_LOWER_BAND in verticalCoverage.penaltyFlags,
+                missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
                 supportsAcceptableVertical = verticalCoverage.supportsAcceptable,
                 hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
-                isVolumeStable = volumeStability.isStable
+                isVolumeStable = volumeStability.isStable,
+                hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
+                hasReviewableModel = refinedPilePoints.size >= 600
             )
         )
 
@@ -174,9 +189,20 @@ class ScanViewModel(
             detection.reasons.forEach { append(" $it") }
         }.trim()
 
-        if (stateDecision.completeness == CompletenessLevel.INSUFFICIENT ||
-            stateDecision.completeness == CompletenessLevel.PARTIAL
-        ) {
+        val diagnostics = buildDiagnostics(
+            coverageResult = coverageResult.coverageRatio,
+            coveredSectors = coverageResult.coveredSectors,
+            totalSectors = coverageResult.totalSectors,
+            trajectoryQuality = trajectoryQuality.trajectoryQualityScore,
+            gpsDistance = gpsDistance,
+            arDistance = arDistance,
+            verticalCoverage = verticalCoverage.verticalCoverageScore,
+            volumeStable = volumeStability.isStable,
+            blockers = stateDecision.blockers,
+            detection = detection
+        )
+
+        if (!stateDecision.canReview) {
             _uiState.update {
                 it.copy(
                     isMeasuring = false,
@@ -189,6 +215,9 @@ class ScanViewModel(
                     arDistanceWalked = arDistance,
                     completeness = stateDecision.completeness,
                     guidanceMessage = gatedGuidance,
+                    shortGuidanceMessage = stateDecision.shortGuidance,
+                    diagnostics = diagnostics,
+                    canReviewMeasurement = false,
                     canFinishMeasurement = false,
                     error = "Medición incompleta. $gatedGuidance"
                 )
@@ -307,6 +336,9 @@ class ScanViewModel(
                 arDistanceWalked = arDistance,
                 completeness = finalCompleteness,
                 guidanceMessage = adjustedGuidance,
+                shortGuidanceMessage = stateDecision.shortGuidance,
+                diagnostics = diagnostics,
+                canReviewMeasurement = true,
                 canFinishMeasurement = stateDecision.canFinish,
                 error = null
             )
@@ -336,7 +368,12 @@ class ScanViewModel(
             currentPoints
         }
 
-        val calcResult = calculator.calculate(measurementPoints)
+        frameCounter++
+        val calcResult = if (frameCounter % 2 == 0) {
+            calculator.calculate(measurementPoints).also { lastLiveScanResult = it }
+        } else {
+            lastLiveScanResult
+        }
         lastDetectionDebug = detection.debugInfo + mapOf(
             "raw_points" to processor.lastStats.rawPoints.toString(),
             "sampled_points" to processor.lastStats.sampledPoints.toString(),
@@ -363,7 +400,11 @@ class ScanViewModel(
         refreshMeasurementState()
     }
 
-    private fun refreshMeasurementState() {
+    private fun refreshMeasurementState(force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastStateRefreshAtMs < 250L) return
+        lastStateRefreshAtMs = now
+
         val currentPoints = points.toList()
         val detection = getDetectionSnapshot(currentPoints, observerPath.toList())
         val evaluationPoints = if (detection.isRobust && detection.pilePoints.size >= 120) {
@@ -400,12 +441,21 @@ class ScanViewModel(
         val stateDecision = stateEvaluator.evaluate(
             MeasurementStateInput(
                 baseCompleteness = baseCompleteness,
+                coverageRatio = coverageResult.coverageRatio,
+                coveredSectors = coverageResult.coveredSectors,
+                observerSamples = observerPath.size,
+                usefulPointCount = evaluationPoints.size,
                 trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
+                hasTrajectoryInstability = TrajectoryPenalty.LOW_KINEMATIC_CONSISTENCY in trajectoryQuality.penaltyFlags,
                 verticalCoverageScore = verticalCoverage.verticalCoverageScore,
                 weakVerticalBands = verticalCoverage.weakBands.size,
+                missingLowerBand = VerticalCoveragePenalty.MISSING_LOWER_BAND in verticalCoverage.penaltyFlags,
+                missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
                 supportsAcceptableVertical = verticalCoverage.supportsAcceptable,
                 hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
-                isVolumeStable = volumeStability.isStable
+                isVolumeStable = volumeStability.isStable,
+                hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
+                hasReviewableModel = evaluationPoints.size >= 600
             )
         )
 
@@ -435,6 +485,18 @@ class ScanViewModel(
             volumeStability.reasons.forEach { append(" $it") }
             detection.reasons.forEach { append(" $it") }
         }
+        val diagnostics = buildDiagnostics(
+            coverageResult = coverageResult.coverageRatio,
+            coveredSectors = coverageResult.coveredSectors,
+            totalSectors = coverageResult.totalSectors,
+            trajectoryQuality = trajectoryQuality.trajectoryQualityScore,
+            gpsDistance = gpsDistance,
+            arDistance = arDistance,
+            verticalCoverage = verticalCoverage.verticalCoverageScore,
+            volumeStable = volumeStability.isStable,
+            blockers = stateDecision.blockers,
+            detection = detection
+        )
 
         if (!detection.isRobust) {
             Log.d("PileObjectDetector", "Fallback activo: ${detection.reasons.joinToString()} | debug=$lastDetectionDebug")
@@ -451,10 +513,39 @@ class ScanViewModel(
                 arDistanceWalked = arDistance,
                 completeness = adjustedCompleteness,
                 guidanceMessage = adjustedGuidance,
+                shortGuidanceMessage = stateDecision.shortGuidance,
+                diagnostics = diagnostics,
+                canReviewMeasurement = stateDecision.canReview,
                 canFinishMeasurement = stateDecision.canFinish &&
                     (adjustedCompleteness == CompletenessLevel.ACCEPTABLE || adjustedCompleteness == CompletenessLevel.COMPLETE)
             )
         }
+    }
+
+    private fun buildDiagnostics(
+        coverageResult: Float,
+        coveredSectors: Int,
+        totalSectors: Int,
+        trajectoryQuality: Float,
+        gpsDistance: Double,
+        arDistance: Double,
+        verticalCoverage: Float,
+        volumeStable: Boolean,
+        blockers: List<String>,
+        detection: com.forest.scanai.domain.engine.PileDetectionResult
+    ): List<String> {
+        val header = listOf(
+            "Sectores cubiertos: $coveredSectors/$totalSectors",
+            "Recorrido AR: ${"%.1f".format(arDistance)} m",
+            "Distancia GPS: ${"%.1f".format(gpsDistance)} m",
+            "Quality score trayectoria: ${"%.2f".format(trajectoryQuality)}",
+            "Cobertura vertical: ${(verticalCoverage * 100).toInt()}%",
+            "Cobertura total: ${(coverageResult * 100).toInt()}%",
+            "Volumen estable: ${if (volumeStable) "Sí" else "No"}",
+            "Detection confidence: ${(detection.detectionConfidence * 100).toInt()}%",
+            "Detector: ${detection.quality.name}"
+        )
+        return (header + blockers + detection.reasons).distinct()
     }
 
     private fun calculateGpsDistance(): Double {
@@ -488,6 +579,9 @@ class ScanViewModel(
         lastDetection = pileObjectDetector.detect(emptyList())
         lastDetectionPointCount = 0
         lastDetectionObserverCount = 0
+        lastStateRefreshAtMs = 0L
+        lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
+        frameCounter = 0
     }
 
     private fun getDetectionSnapshot(

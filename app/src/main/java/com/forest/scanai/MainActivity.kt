@@ -60,14 +60,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             ForestScanAITheme {
                 var currentScreen by remember { mutableStateOf("scan") }
-                val finalResult by viewModel.finalResult.collectAsState()
-
-                LaunchedEffect(finalResult) {
-                    finalResult?.let {
-                        reviewViewModel.setScanResult(it)
-                        currentScreen = "review"
-                    }
-                }
 
                 MainScreen(
                     currentScreen = currentScreen,
@@ -91,6 +83,10 @@ class MainActivity : ComponentActivity() {
                     onBackToScan = {
                         viewModel.reset()
                         currentScreen = "scan"
+                    },
+                    onOpenReview = {
+                        reviewViewModel.setScanResult(it)
+                        currentScreen = "review"
                     }
                 )
             }
@@ -104,7 +100,8 @@ fun MainScreen(
     viewModel: ScanViewModel,
     reviewViewModel: ScanReviewViewModel,
     onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit,
-    onBackToScan: () -> Unit
+    onBackToScan: () -> Unit,
+    onOpenReview: (ScanSessionResult) -> Unit
 ) {
     val context = LocalContext.current
     val permissions = arrayOf(
@@ -134,7 +131,7 @@ fun MainScreen(
 
     if (permissionsGranted) {
         when (currentScreen) {
-            "scan" -> ScanScreen(viewModel, onSaveReport)
+            "scan" -> ScanScreen(viewModel, onSaveReport, onOpenReview)
             "review" -> ScanReview3DScreen(reviewViewModel, onBack = onBackToScan)
         }
     } else {
