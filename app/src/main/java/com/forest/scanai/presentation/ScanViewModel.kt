@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.os.SystemClock
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -81,6 +82,9 @@ class ScanViewModel(
     private var lastDetection = pileObjectDetector.detect(emptyList())
     private var lastDetectionPointCount = 0
     private var lastDetectionObserverCount = 0
+    private var lastStateRefreshAtMs = 0L
+    private var lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
+    private var frameCounter = 0
 
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
@@ -104,7 +108,7 @@ class ScanViewModel(
                     val last = trajectory.last()
                     if (loc.distanceTo(last) > 1.5f && loc.accuracy <= 25f) trajectory.add(loc)
                 }
-                refreshMeasurementState()
+                refreshMeasurementState(force = true)
             }
         }
     }
@@ -364,7 +368,12 @@ class ScanViewModel(
             currentPoints
         }
 
-        val calcResult = calculator.calculate(measurementPoints)
+        frameCounter++
+        val calcResult = if (frameCounter % 2 == 0) {
+            calculator.calculate(measurementPoints).also { lastLiveScanResult = it }
+        } else {
+            lastLiveScanResult
+        }
         lastDetectionDebug = detection.debugInfo + mapOf(
             "raw_points" to processor.lastStats.rawPoints.toString(),
             "sampled_points" to processor.lastStats.sampledPoints.toString(),
@@ -391,7 +400,11 @@ class ScanViewModel(
         refreshMeasurementState()
     }
 
-    private fun refreshMeasurementState() {
+    private fun refreshMeasurementState(force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastStateRefreshAtMs < 250L) return
+        lastStateRefreshAtMs = now
+
         val currentPoints = points.toList()
         val detection = getDetectionSnapshot(currentPoints, observerPath.toList())
         val evaluationPoints = if (detection.isRobust && detection.pilePoints.size >= 120) {
@@ -566,6 +579,9 @@ class ScanViewModel(
         lastDetection = pileObjectDetector.detect(emptyList())
         lastDetectionPointCount = 0
         lastDetectionObserverCount = 0
+        lastStateRefreshAtMs = 0L
+        lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
+        frameCounter = 0
     }
 
     private fun getDetectionSnapshot(

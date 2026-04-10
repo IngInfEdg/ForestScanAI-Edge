@@ -55,6 +55,10 @@ fun ScanScreen(
     val uiState by viewModel.uiState.collectAsState()
     val finalResult by viewModel.finalResult.collectAsState()
     val points = viewModel.points
+    val visualPoints = remember(points.size) {
+        val maxVisualPoints = 2200
+        if (points.size <= maxVisualPoints) points.toList() else points.takeLast(maxVisualPoints)
+    }
     var viewMatrix by remember { mutableStateOf(FloatArray(16)) }
     var projMatrix by remember { mutableStateOf(FloatArray(16)) }
 
@@ -90,7 +94,7 @@ fun ScanScreen(
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (uiState.trackingState == TrackingState.TRACKING && finalResult == null) {
-                points.forEach { pos ->
+                visualPoints.forEach { pos ->
                     projectPointToScreen(
                         pos,
                         viewMatrix,
@@ -244,14 +248,7 @@ fun ScanScreen(
                                 onClick = { viewModel.toggleMeasuring() },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))
                             ) {
-                                Text("Guardar revisión")
-                            }
-
-                            Button(
-                                onClick = { viewModel.toggleMeasuring() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
-                            ) {
-                                Text("Ver modelo 3D")
+                                Text("Detener para revisión")
                             }
                         }
 
