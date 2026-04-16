@@ -11,15 +11,26 @@ class ScanGuidanceEngine {
         usefulPoints: Int,
         missingUpperBand: Boolean = false,
         lowTopCoverage: Boolean = false,
+        topCoverageState: TopCoverageState = TopCoverageState.TOP_MISSING,
+        topNeedsPerspective: Boolean = false,
         autoCompletionCandidate: Boolean = false
     ): String {
         if (autoCompletionCandidate) {
             return "Medición completa detectada. Ya puedes finalizar; no se observan mejoras relevantes en la nube."
         }
+        val topGuidance = when {
+            topNeedsPerspective -> "Da un paso atrás para capturar la corona completa."
+            topCoverageState == TopCoverageState.TOP_IMPROVING ->
+                "La cima está mejorando; mantén el encuadre unos segundos."
+            topCoverageState == TopCoverageState.TOP_OK -> ""
+            missingUpperBand || lowTopCoverage -> "Inclina el celular hacia la cima de la pila."
+            else -> ""
+        }
+
         return when (completeness) {
             CompletenessLevel.INSUFFICIENT -> {
                 when {
-                    missingUpperBand || lowTopCoverage -> "Inclina el celular hacia la cima de la pila y mantén la corona al centro."
+                    topGuidance.isNotBlank() -> topGuidance
                     observerSamples < 20 -> "Sigue rodeando la pila para registrar mejor el recorrido."
                     usefulPoints < 800 -> "Acércate un poco más y sigue escaneando para capturar más puntos."
                     missingSectors.isNotEmpty() -> "Faltan sectores por cubrir: ${missingSectors.joinToString()}."
@@ -27,7 +38,7 @@ class ScanGuidanceEngine {
                 }
             }
             CompletenessLevel.PARTIAL -> when {
-                missingUpperBand || lowTopCoverage -> "Aún faltan puntos en la parte más alta de la pila."
+                topGuidance.isNotBlank() -> topGuidance
                 else -> "Cobertura parcial. Aún faltan sectores de la pila por medir."
             }
             CompletenessLevel.ACCEPTABLE ->

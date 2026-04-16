@@ -17,6 +17,7 @@ class VerticalCoverageEvaluatorTest {
 
         assertTrue("Score vertical alto esperado para nube balanceada", result.verticalCoverageScore >= 0.75f)
         assertTrue("Top coverage debería ser alto en nube balanceada", result.topCoverageScore >= 0.60f)
+        assertTrue("Estado de corona debería marcar TOP_OK", result.topCoverageState == TopCoverageState.TOP_OK)
         assertTrue("Debe cubrir 3 bandas", result.coveredBands.size == 3)
         assertFalse("No debería penalizar dominancia media", VerticalCoveragePenalty.MIDDLE_DOMINANCE in result.penaltyFlags)
     }
@@ -52,6 +53,18 @@ class VerticalCoverageEvaluatorTest {
             VerticalCoveragePenalty.TOP_SURFACE_SPARSE in result.penaltyFlags
         )
         assertTrue("Top coverage score debe reflejar falta de densidad", result.topCoverageScore < 0.55f)
+        assertTrue("Estado debe indicar cima faltante", result.topCoverageState == TopCoverageState.TOP_MISSING)
+    }
+
+    @Test
+    fun improvingRecentTopCoverage_shouldClassifyAsImproving() {
+        val points = buildBandPoints(lower = 120, middle = 120, upper = 38)
+        val recent = listOf(0.21f, 0.29f, 0.34f, 0.37f)
+
+        val result = evaluator.evaluate(points, recentTopCoverageScores = recent)
+
+        assertTrue("Debe detectar estado intermedio TOP_IMPROVING", result.topCoverageState == TopCoverageState.TOP_IMPROVING)
+        assertTrue("La tendencia reciente debe ser positiva", result.topCoverageTrend > 0f)
     }
 
     private fun buildBandPoints(lower: Int, middle: Int, upper: Int): List<Position> {

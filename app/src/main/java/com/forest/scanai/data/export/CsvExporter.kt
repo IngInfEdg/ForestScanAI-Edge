@@ -26,7 +26,7 @@ class CsvExporter(private val context: Context) {
             val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
             FileWriter(file).use { writer ->
                 writer.append(
-                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VolumeBeforeCorrection,VolumeAfterCorrection,VerticalCoverageScore,TopCoverageScore,TrajectoryQualityScore,VolumeStabilityScore,AutoCompletionCandidate,FallbackReasons\n"
+                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VolumeBeforeCorrection,VolumeAfterCorrection,VerticalCoverageScore,TopCoverageScore,TopPointCount,TopBandDensity,TopCoverageState,TopCoverageTrend,TopCoverageTemporalStability,TrajectoryQualityScore,VolumeStabilityScore,VolumeVariationRatio,VolumeIqrRatio,VolumeMadRatio,VolumeDriftRatio,ScaleValidationScore,ReferenceExpectedM,ReferenceObservedM,ReferenceRelativeError,ReferenceStatus,AutoCompletionCandidate,FallbackReasons\n"
                 )
 
                 val debug = result?.detectionDebugInfo.orEmpty()
@@ -62,8 +62,22 @@ class CsvExporter(private val context: Context) {
                         debug["volume_after_correction"] ?: "",
                         debug["vertical_coverage_score"] ?: "",
                         debug["top_coverage_score"] ?: "",
+                        debug["top_point_count"] ?: "",
+                        debug["top_band_density"] ?: "",
+                        debug["top_coverage_state"] ?: "",
+                        debug["top_coverage_trend"] ?: "",
+                        debug["top_coverage_temporal_stability"] ?: "",
                         debug["trajectory_quality_score"] ?: "",
                         debug["volume_stability_score"] ?: "",
+                        debug["volume_variation_ratio"] ?: "",
+                        debug["volume_iqr_ratio"] ?: "",
+                        debug["volume_mad_ratio"] ?: "",
+                        debug["volume_drift_ratio"] ?: "",
+                        debug["scale_validation_score"] ?: "",
+                        debug["reference_expected_m"] ?: "",
+                        debug["reference_observed_m"] ?: "",
+                        debug["reference_relative_error"] ?: "",
+                        debug["reference_status"] ?: "",
                         debug["auto_completion_candidate"] ?: "",
                         fallbackReasons
                     ).joinToString(",") { csvSafe(it) } + "\n"

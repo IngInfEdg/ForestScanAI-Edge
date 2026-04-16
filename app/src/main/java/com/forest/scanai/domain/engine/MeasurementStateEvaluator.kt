@@ -83,7 +83,10 @@ class MeasurementStateEvaluator(
         val shortGuidance = when {
             autoCompletionCandidate -> "Medición completa detectada. Ya puedes finalizar."
             input.missingLowerBand -> "Falta capturar mejor la base."
-            input.missingUpperBand -> "Inclina el celular hacia la cima de la pila."
+            input.topCoverageState == TopCoverageState.TOP_MISSING && input.missingUpperBand ->
+                "Inclina el celular hacia la cima de la pila."
+            input.topCoverageState == TopCoverageState.TOP_IMPROVING ->
+                "La cima está mejorando; mantén el encuadre unos segundos."
             input.topCoverageScore < 0.55f -> "Da un paso atrás para capturar la corona completa."
             input.hasTrajectoryInstability -> "Recorrido con saltos; mueve el celular más parejo."
             canFinish -> "Medición completa. Ya puedes finalizar."
@@ -123,6 +126,7 @@ data class MeasurementStateInput(
     val hasStrongMiddleConcentration: Boolean,
     val isVolumeStable: Boolean,
     val topCoverageScore: Float,
+    val topCoverageState: TopCoverageState = TopCoverageState.TOP_MISSING,
     val recentUsefulPointGrowthRatio: Float,
     val recentVolumeDeltaRatio: Float,
     val hasUsableDetection: Boolean,
@@ -141,7 +145,9 @@ data class MeasurementStateDecision(
 class VolumeStabilityEvaluator(
     private val windowSize: Int = 7,
     private val minSamples: Int = 5,
-    private val maxRelativeVariation: Double = 0.12
+    private val maxIqrVariation: Double = 0.14,
+    private val maxMadVariation: Double = 0.10,
+    private val maxDriftRatio: Double = 0.08
 ) {
 
     fun evaluate(volumeSamples: List<Double>): VolumeStabilityResult {
@@ -150,11 +156,16 @@ class VolumeStabilityEvaluator(
             return VolumeStabilityResult(
                 isStable = false,
                 relativeVariation = 1.0,
+                relativeIqr = 1.0,
+                relativeMad = 1.0,
+                driftRatio = 1.0,
+                stabilityScore = 0.0,
                 reasons = listOf("Aún no hay suficientes muestras para verificar estabilidad del volumen.")
             )
         }
 
-        val median = window.sorted().let { sorted ->
+        val sorted = window.sorted()
+        val median = sorted.let {
             if (sorted.size % 2 == 0) {
                 (sorted[sorted.size / 2] + sorted[sorted.size / 2 - 1]) / 2.0
             } else {
@@ -162,10 +173,37 @@ class VolumeStabilityEvaluator(
             }
         }.coerceAtLeast(1e-6)
 
-        val min = window.minOrNull() ?: median
-        val max = window.maxOrNull() ?: median
+        val q1 = sorted[(sorted.size - 1) / 4]
+        val q3 = sorted[((sorted.size - 1) * 3) / 4]
+        val iqr = (q3 - q1).coerceAtLeast(0.0)
+        val mad = window.map { kotlin.math.abs(it - median) }.sorted().let { deviations ->
+            if (deviations.size % 2 == 0) {
+                (deviations[deviations.size / 2] + deviations[deviations.size / 2 - 1]) / 2.0
+            } else deviations[deviations.size / 2]
+        }
+
+        val firstHalfMean = window.take(window.size / 2).average().takeIf { !it.isNaN() } ?: median
+        val secondHalfMean = window.drop(window.size / 2).average().takeIf { !it.isNaN() } ?: median
+        val driftRatio = kotlin.math.abs(secondHalfMean - firstHalfMean) / median
+
+        val lowerFence = q1 - 1.5 * iqr
+        val upperFence = q3 + 1.5 * iqr
+        val trimmed = window.filter { it in lowerFence..upperFence }
+        val min = trimmed.minOrNull() ?: q1
+        val max = trimmed.maxOrNull() ?: q3
         val relativeVariation = ((max - min) / median).coerceAtLeast(0.0)
-        val stable = relativeVariation <= maxRelativeVariation
+        val relativeIqr = (iqr / median).coerceAtLeast(0.0)
+        val relativeMad = ((mad * 1.4826) / median).coerceAtLeast(0.0)
+        val stabilityScore = (
+            1.0 -
+                (relativeIqr / maxIqrVariation) * 0.45 -
+                (relativeMad / maxMadVariation) * 0.35 -
+                (driftRatio / maxDriftRatio) * 0.20
+            ).coerceIn(0.0, 1.0)
+        val stable = relativeIqr <= maxIqrVariation &&
+            relativeMad <= maxMadVariation &&
+            driftRatio <= maxDriftRatio &&
+            stabilityScore >= 0.70
 
         val reasons = if (stable) {
             emptyList()
@@ -176,6 +214,10 @@ class VolumeStabilityEvaluator(
         return VolumeStabilityResult(
             isStable = stable,
             relativeVariation = relativeVariation,
+            relativeIqr = relativeIqr,
+            relativeMad = relativeMad,
+            driftRatio = driftRatio,
+            stabilityScore = stabilityScore,
             reasons = reasons
         )
     }
@@ -184,5 +226,9 @@ class VolumeStabilityEvaluator(
 data class VolumeStabilityResult(
     val isStable: Boolean,
     val relativeVariation: Double,
+    val relativeIqr: Double,
+    val relativeMad: Double,
+    val driftRatio: Double,
+    val stabilityScore: Double,
     val reasons: List<String>
 )

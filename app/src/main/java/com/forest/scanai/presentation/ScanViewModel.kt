@@ -18,7 +18,9 @@ import com.forest.scanai.domain.engine.PileCoverageQualityLevel
 import com.forest.scanai.domain.engine.PileObjectDetector
 import com.forest.scanai.domain.engine.PointCloudProcessor
 import com.forest.scanai.domain.engine.PointCloudReviewModelBuilder
+import com.forest.scanai.domain.engine.ReferenceScaleValidator
 import com.forest.scanai.domain.engine.ScanGuidanceEngine
+import com.forest.scanai.domain.engine.TopCoverageState
 import com.forest.scanai.domain.engine.TrajectoryQualityEvaluator
 import com.forest.scanai.domain.engine.VerticalCoverageEvaluator
 import com.forest.scanai.domain.engine.VerticalCoveragePenalty
@@ -26,6 +28,8 @@ import com.forest.scanai.domain.engine.VolumeCalculator
 import com.forest.scanai.domain.engine.VolumeStabilityEvaluator
 import com.forest.scanai.domain.engine.TrajectoryPenalty
 import com.forest.scanai.domain.model.CompletenessLevel
+import com.forest.scanai.domain.model.ReferenceObject
+import com.forest.scanai.domain.model.ReferenceObjectType
 import com.forest.scanai.domain.model.ScanSessionResult
 import com.forest.scanai.domain.model.ScanUiState
 import io.github.sceneview.math.Position
@@ -51,6 +55,7 @@ class ScanViewModel(
     private val trajectoryQualityEvaluator: TrajectoryQualityEvaluator = TrajectoryQualityEvaluator(),
     private val verticalCoverageEvaluator: VerticalCoverageEvaluator = VerticalCoverageEvaluator(),
     private val volumeStabilityEvaluator: VolumeStabilityEvaluator = VolumeStabilityEvaluator(),
+    private val referenceScaleValidator: ReferenceScaleValidator = ReferenceScaleValidator(),
     private val stateEvaluator: MeasurementStateEvaluator = MeasurementStateEvaluator(),
     private val completenessValidator: MeasurementCompletenessValidator =
         MeasurementCompletenessValidator(),
@@ -76,6 +81,7 @@ class ScanViewModel(
     private val observerPath = mutableStateListOf<Position>()
     private val volumeHistory = ArrayDeque<Double>()
     private val usefulPointHistory = ArrayDeque<Int>()
+    private val topCoverageHistory = ArrayDeque<Float>()
 
     private var startPos: Position? = null
     private var gpsJob: Job? = null
@@ -86,6 +92,17 @@ class ScanViewModel(
     private var lastStateRefreshAtMs = 0L
     private var lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
     private var frameCounter = 0
+    private var configuredReferenceObject: ReferenceObject? = ReferenceObject(
+        id = "default_bar_2m",
+        type = ReferenceObjectType.BAR_2M,
+        expectedLengthMeters = 2.0,
+        label = "Barra de referencia 2m"
+    )
+    private var manualReferenceObservedLengthMeters: Double? = null
+
+    fun setManualReferenceBarObservation(observedLengthMeters: Double?) {
+        manualReferenceObservedLengthMeters = observedLengthMeters?.takeIf { it > 0.0 }
+    }
 
     private fun selectPilePreferredPoints(
         detection: com.forest.scanai.domain.engine.PileDetectionResult,
@@ -149,9 +166,14 @@ class ScanViewModel(
         val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
         val verticalCoverage = verticalCoverageEvaluator.evaluate(
             pilePoints = refinedPilePoints,
-            observerPath = observerPath.toList()
+            observerPath = observerPath.toList(),
+            recentTopCoverageScores = topCoverageHistory.toList()
         )
         val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
+        val referenceMeasurement = referenceScaleValidator.validate(
+            referenceObject = configuredReferenceObject,
+            observedLengthMeters = manualReferenceObservedLengthMeters
+        )
 
         val gpsDistance = calculateGpsDistance()
         val arDistance = calculateArDistance()
@@ -182,6 +204,7 @@ class ScanViewModel(
                 hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
                 isVolumeStable = volumeStability.isStable,
                 topCoverageScore = verticalCoverage.topCoverageScore,
+                topCoverageState = verticalCoverage.topCoverageState,
                 recentUsefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
                 recentVolumeDeltaRatio = computeRecentVolumeDeltaRatio(),
                 hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
@@ -196,6 +219,10 @@ class ScanViewModel(
             usefulPoints = refinedPilePoints.size,
             missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
             lowTopCoverage = verticalCoverage.topCoverageScore < 0.55f,
+            topCoverageState = verticalCoverage.topCoverageState,
+            topNeedsPerspective = verticalCoverage.topCoverageState == TopCoverageState.TOP_MISSING &&
+                verticalCoverage.topPointCount >= 12 &&
+                verticalCoverage.topBandDensity < 14f,
             autoCompletionCandidate = stateDecision.autoCompletionCandidate
         )
 
@@ -217,6 +244,7 @@ class ScanViewModel(
             arDistance = arDistance,
             verticalCoverage = verticalCoverage.verticalCoverageScore,
             topCoverage = verticalCoverage.topCoverageScore,
+            topCoverageState = verticalCoverage.topCoverageState,
             volumeStable = volumeStability.isStable,
             autoCompletionCandidate = stateDecision.autoCompletionCandidate,
             usefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
@@ -323,8 +351,22 @@ class ScanViewModel(
             "detection_confidence" to String.format("%.3f", detection.detectionConfidence),
             "vertical_coverage_score" to String.format("%.3f", verticalCoverage.verticalCoverageScore),
             "top_coverage_score" to String.format("%.3f", verticalCoverage.topCoverageScore),
+            "top_point_count" to verticalCoverage.topPointCount.toString(),
+            "top_band_density" to String.format("%.3f", verticalCoverage.topBandDensity),
+            "top_coverage_state" to verticalCoverage.topCoverageState.name,
+            "top_coverage_trend" to String.format("%.3f", verticalCoverage.topCoverageTrend),
+            "top_coverage_temporal_stability" to String.format("%.3f", verticalCoverage.topCoverageTemporalStability),
             "trajectory_quality_score" to String.format("%.3f", trajectoryQuality.trajectoryQualityScore),
-            "volume_stability_score" to String.format("%.3f", 1.0 - volumeStability.relativeVariation.coerceIn(0.0, 1.0)),
+            "volume_stability_score" to String.format("%.3f", volumeStability.stabilityScore),
+            "volume_variation_ratio" to String.format("%.3f", volumeStability.relativeVariation),
+            "volume_iqr_ratio" to String.format("%.3f", volumeStability.relativeIqr),
+            "volume_mad_ratio" to String.format("%.3f", volumeStability.relativeMad),
+            "volume_drift_ratio" to String.format("%.3f", volumeStability.driftRatio),
+            "scale_validation_score" to String.format("%.3f", referenceMeasurement?.scaleValidationScore ?: 0f),
+            "reference_expected_m" to String.format("%.3f", referenceMeasurement?.referenceObject?.expectedLengthMeters ?: 0.0),
+            "reference_observed_m" to String.format("%.3f", referenceMeasurement?.observedLengthMeters ?: 0.0),
+            "reference_relative_error" to String.format("%.3f", referenceMeasurement?.relativeError ?: 0.0),
+            "reference_status" to (referenceMeasurement?.status?.name ?: "NOT_CONFIGURED"),
             "auto_completion_candidate" to stateDecision.autoCompletionCandidate.toString()
         ) + result.debugInfo
 
@@ -364,6 +406,9 @@ class ScanViewModel(
             detectionDebugInfo = calibrationDebugInfo,
             volumeBeforeCorrection = result.volumeBeforeCorrection,
             volumeAfterCorrection = result.volumeAfterCorrection,
+            referenceBarMeasurement = referenceMeasurement,
+            scaleValidationScore = referenceMeasurement?.scaleValidationScore ?: 0f,
+            volumeStabilityScore = volumeStability.stabilityScore.toFloat(),
             appVersionName = appVersionName,
             appVersionCode = appVersionCode,
             appVersionDisplay = appVersionDisplay
@@ -481,8 +526,11 @@ class ScanViewModel(
         val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
         val verticalCoverage = verticalCoverageEvaluator.evaluate(
             pilePoints = evaluationPoints,
-            observerPath = observerPath.toList()
+            observerPath = observerPath.toList(),
+            recentTopCoverageScores = topCoverageHistory.toList()
         )
+        topCoverageHistory.addLast(verticalCoverage.topCoverageScore)
+        if (topCoverageHistory.size > 24) topCoverageHistory.removeFirst()
         val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
 
         val cloudQuality = pileCoverageQualityEvaluator.evaluate(evaluationPoints)
@@ -503,6 +551,7 @@ class ScanViewModel(
                 hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
                 isVolumeStable = volumeStability.isStable,
                 topCoverageScore = verticalCoverage.topCoverageScore,
+                topCoverageState = verticalCoverage.topCoverageState,
                 recentUsefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
                 recentVolumeDeltaRatio = computeRecentVolumeDeltaRatio(),
                 hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
@@ -528,6 +577,10 @@ class ScanViewModel(
             usefulPoints = evaluationPoints.size,
             missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
             lowTopCoverage = verticalCoverage.topCoverageScore < 0.55f,
+            topCoverageState = verticalCoverage.topCoverageState,
+            topNeedsPerspective = verticalCoverage.topCoverageState == TopCoverageState.TOP_MISSING &&
+                verticalCoverage.topPointCount >= 12 &&
+                verticalCoverage.topBandDensity < 14f,
             autoCompletionCandidate = stateDecision.autoCompletionCandidate
         )
 
@@ -548,6 +601,7 @@ class ScanViewModel(
             arDistance = arDistance,
             verticalCoverage = verticalCoverage.verticalCoverageScore,
             topCoverage = verticalCoverage.topCoverageScore,
+            topCoverageState = verticalCoverage.topCoverageState,
             volumeStable = volumeStability.isStable,
             autoCompletionCandidate = stateDecision.autoCompletionCandidate,
             usefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
@@ -589,6 +643,7 @@ class ScanViewModel(
         arDistance: Double,
         verticalCoverage: Float,
         topCoverage: Float,
+        topCoverageState: TopCoverageState,
         volumeStable: Boolean,
         autoCompletionCandidate: Boolean,
         usefulPointGrowthRatio: Float,
@@ -603,6 +658,7 @@ class ScanViewModel(
             "Quality score trayectoria: ${"%.2f".format(trajectoryQuality)}",
             "Cobertura vertical: ${(verticalCoverage * 100).toInt()}%",
             "Cobertura de cima/corona: ${(topCoverage * 100).toInt()}%",
+            "Estado de corona: ${topCoverageState.name}",
             "Cobertura total: ${(coverageResult * 100).toInt()}%",
             "Volumen estable: ${if (volumeStable) "Sí" else "No"}",
             "Crecimiento puntos útiles (reciente): ${"%.2f".format(usefulPointGrowthRatio * 100f)}%",
@@ -685,6 +741,7 @@ class ScanViewModel(
         observerPath.clear()
         volumeHistory.clear()
         usefulPointHistory.clear()
+        topCoverageHistory.clear()
         startPos = null
         gpsJob?.cancel()
         _uiState.value = ScanUiState(appVersionDisplay = appVersionDisplay)

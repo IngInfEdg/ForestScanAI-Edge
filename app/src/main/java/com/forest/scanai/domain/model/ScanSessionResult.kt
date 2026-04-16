@@ -53,6 +53,9 @@ data class ScanSessionResult(
     val detectionDebugInfo: Map<String, String> = emptyMap(),
     val volumeBeforeCorrection: Double = 0.0,
     val volumeAfterCorrection: Double = 0.0,
+    val referenceBarMeasurement: ReferenceBarMeasurement? = null,
+    val scaleValidationScore: Float = 0f,
+    val volumeStabilityScore: Float = 0f,
 
     val appVersionName: String = "",
     val appVersionCode: Long = 0,
