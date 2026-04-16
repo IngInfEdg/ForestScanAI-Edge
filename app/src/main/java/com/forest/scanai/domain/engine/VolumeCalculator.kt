@@ -47,6 +47,7 @@ class VolumeCalculator(
 
         val sliceAreas = MutableList(numSlices) { 0.0 }
         val topPoints = mutableListOf<Position>()
+        var usefulSlices = 0
 
         for (sliceIndex in 0 until numSlices) {
             val startAlong = axis.minAlong + sliceIndex * sliceWidth
@@ -57,6 +58,7 @@ class VolumeCalculator(
             val metrics = evaluateSlice(pointsInSlice)
 
             sliceAreas[sliceIndex] = metrics.area
+            if (metrics.isUseful) usefulSlices++
 
             val topY = if (metrics.isUseful) metrics.crestY else metrics.groundY
             topPoints.add(axisEstimator.pointOnAxis(axis, centerAlong, topY))
@@ -69,17 +71,35 @@ class VolumeCalculator(
             rawVolume += ((sliceAreas[i] + sliceAreas[i + 1]) / 2.0) * sliceWidth
         }
 
+        val usefulSliceRatio = usefulSlices / numSlices.toDouble()
+        val edgeRecoveryFactor = when {
+            usefulSliceRatio < 0.40 -> 1.20
+            usefulSliceRatio < 0.60 -> 1.12
+            usefulSliceRatio < 0.75 -> 1.06
+            else -> 1.0
+        }
+        val correctedVolume = rawVolume * edgeRecoveryFactor
+
         val finalVolume = if (lastCalculatedVolume == 0.0) {
-            rawVolume
+            correctedVolume
         } else {
-            lastCalculatedVolume + 0.05 * (rawVolume - lastCalculatedVolume)
+            lastCalculatedVolume + 0.05 * (correctedVolume - lastCalculatedVolume)
         }
 
         lastCalculatedVolume = finalVolume
 
         return ScanResult(
             volume = finalVolume.coerceAtLeast(0.0),
-            topPoints = smoothedTopPoints
+            topPoints = smoothedTopPoints,
+            volumeBeforeCorrection = rawVolume.coerceAtLeast(0.0),
+            volumeAfterCorrection = correctedVolume.coerceAtLeast(0.0),
+            debugInfo = mapOf(
+                "volume_input_points" to points.size.toString(),
+                "volume_slices_total" to numSlices.toString(),
+                "volume_slices_useful" to usefulSlices.toString(),
+                "volume_slice_ratio" to String.format("%.3f", usefulSliceRatio),
+                "volume_edge_recovery_factor" to String.format("%.3f", edgeRecoveryFactor)
+            )
         )
     }
 
@@ -95,7 +115,7 @@ class VolumeCalculator(
 
         val ys = pointsInSlice.map { it.source.y }.sorted()
         val sliceGround = percentile(ys, 0.10f)
-        val pileBase = percentile(ys, 0.22f)
+        val pileBase = percentile(ys, 0.18f)
         val crestY = percentile(ys, 0.96f)
 
         val rawHeight = (crestY - sliceGround).toDouble()
@@ -108,7 +128,7 @@ class VolumeCalculator(
             )
         }
 
-        val pileCandidatePoints = pointsInSlice.filter { it.source.y >= pileBase + 0.05f }
+        val pileCandidatePoints = pointsInSlice.filter { it.source.y >= pileBase + 0.03f }
         if (pileCandidatePoints.size < 12) {
             return SliceMetrics(
                 area = 0.0,
@@ -119,11 +139,11 @@ class VolumeCalculator(
         }
 
         val pileYs = pileCandidatePoints.map { it.source.y }.sorted()
-        val refinedCrestY = percentile(pileYs, 0.94f)
+        val refinedCrestY = percentile(pileYs, 0.97f)
 
         val crossValues = pileCandidatePoints.map { it.cross }.sorted()
-        val crossMin = percentile(crossValues, 0.08f)
-        val crossMax = percentile(crossValues, 0.92f)
+        val crossMin = percentile(crossValues, 0.04f)
+        val crossMax = percentile(crossValues, 0.96f)
         val effectiveWidth = (crossMax - crossMin).toDouble().coerceAtLeast(0.0)
 
         if (effectiveWidth <= 0.05) {
@@ -177,7 +197,7 @@ class VolumeCalculator(
 
             val ys = binPoints.map { it.source.y }.sorted()
             val ground = min(fallbackGround, percentile(ys, 0.12f))
-            val top = percentile(ys, 0.90f)
+            val top = percentile(ys, 0.93f)
             val binHeight = (top - ground).toDouble()
 
             if (binHeight > params.groundMargin) {
@@ -188,7 +208,7 @@ class VolumeCalculator(
 
         if (contributingBins == 0) {
             val fallbackHeight = (fallbackCrest - fallbackGround).toDouble().coerceAtLeast(0.0)
-            return fallbackHeight * width * 0.55
+            return fallbackHeight * width * 0.70
         }
 
         return totalArea

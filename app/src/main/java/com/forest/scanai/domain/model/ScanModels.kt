@@ -31,7 +31,10 @@ data class ScanUiState(
 
 data class ScanResult(
     val volume: Double,
-    val topPoints: List<Position>
+    val topPoints: List<Position>,
+    val volumeBeforeCorrection: Double = 0.0,
+    val volumeAfterCorrection: Double = volume,
+    val debugInfo: Map<String, String> = emptyMap()
 )
 
 enum class CompletenessLevel {

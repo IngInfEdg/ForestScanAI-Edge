@@ -51,6 +51,8 @@ data class ScanSessionResult(
     val pileDetectionQuality: String = "FALLBACK",
     val pileDetectionReasons: List<String> = emptyList(),
     val detectionDebugInfo: Map<String, String> = emptyMap(),
+    val volumeBeforeCorrection: Double = 0.0,
+    val volumeAfterCorrection: Double = 0.0,
 
     val appVersionName: String = "",
     val appVersionCode: Long = 0,

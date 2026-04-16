@@ -26,7 +26,7 @@ class CsvExporter(private val context: Context) {
             val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
             FileWriter(file).use { writer ->
                 writer.append(
-                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,EstimatedHeight,BoundingBox,FallbackReasons\n"
+                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VolumeBeforeCorrection,VolumeAfterCorrection,VerticalCoverageScore,TrajectoryQualityScore,FallbackReasons\n"
                 )
 
                 val debug = result?.detectionDebugInfo.orEmpty()
@@ -43,6 +43,8 @@ class CsvExporter(private val context: Context) {
                         uiState.stereoVolume.toString(),
                         uiState.netVolume.toString(),
                         result?.pointsCount?.toString() ?: "",
+                        debug["raw_points"] ?: "",
+                        debug["accepted_points"] ?: "",
                         debug["ground_points"] ?: "",
                         debug["non_ground_points"] ?: "",
                         debug["pile_points"] ?: "",
@@ -52,6 +54,14 @@ class CsvExporter(private val context: Context) {
                         result?.pileDetectionConfidence?.toString() ?: "",
                         debug["estimated_height"] ?: "",
                         boundingBox,
+                        debug["bounding_box_final"] ?: "",
+                        debug["max_height"] ?: "",
+                        debug["p95_height"] ?: "",
+                        debug["mean_height"] ?: "",
+                        debug["volume_before_correction"] ?: "",
+                        debug["volume_after_correction"] ?: "",
+                        debug["vertical_coverage_score"] ?: "",
+                        debug["trajectory_quality_score"] ?: "",
                         fallbackReasons
                     ).joinToString(",") { csvSafe(it) } + "\n"
                 )
