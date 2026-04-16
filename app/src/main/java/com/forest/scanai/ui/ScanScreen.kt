@@ -27,10 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -49,8 +46,7 @@ import java.util.Locale
 @Composable
 fun ScanScreen(
     viewModel: ScanViewModel,
-    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit,
-    onOpenReview: (ScanSessionResult) -> Unit
+    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val finalResult by viewModel.finalResult.collectAsState()
@@ -110,32 +106,6 @@ fun ScanScreen(
                     }
                 }
 
-                if (uiState.topPoints.size > 1) {
-                    val screenPoints: List<Offset> = uiState.topPoints.mapNotNull { pos ->
-                        projectPointToScreen(
-                            pos,
-                            viewMatrix,
-                            projMatrix,
-                            size.width,
-                            size.height
-                        )
-                    }
-
-                    if (screenPoints.size > 1) {
-                        val path = Path().apply {
-                            moveTo(screenPoints[0].x, screenPoints[0].y)
-                            for (i in 1 until screenPoints.size) {
-                                lineTo(screenPoints[i].x, screenPoints[i].y)
-                            }
-                        }
-
-                        drawPath(
-                            path = path,
-                            color = Color.Red,
-                            style = Stroke(width = 3.dp.toPx())
-                        )
-                    }
-                }
             }
         }
 
@@ -272,10 +242,10 @@ fun ScanScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (uiState.canFinishMeasurement) {
                         Button(
-                            onClick = { finalResult?.let(onOpenReview) },
+                            onClick = { viewModel.reset() },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                         ) {
-                            Text("Finalizar medición")
+                            Text("Finalizar")
                         }
                     } else {
                         Button(
@@ -283,13 +253,6 @@ fun ScanScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))
                         ) {
                             Text("Guardar revisión")
-                        }
-
-                        Button(
-                            onClick = { finalResult?.let(onOpenReview) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5))
-                        ) {
-                            Text("Ver modelo 3D")
                         }
                     }
                     Button(
@@ -303,7 +266,7 @@ fun ScanScreen(
                         onClick = { viewModel.reset() },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
                     ) {
-                        Text("Nueva medición")
+                        Text("Repetir medición")
                     }
                 }
             }
@@ -336,7 +299,7 @@ private fun ResultOverlay(
         )
 
         Text(
-            text = "Volumen: ${formatDouble(result.volume)} m³",
+            text = "m³ Estéreo: ${formatDouble(result.volume)}  •  m³ Neto: ${formatDouble(result.volume * 0.45)}",
             color = Color(0xFF35D07F),
             style = MaterialTheme.typography.bodyLarge
         )

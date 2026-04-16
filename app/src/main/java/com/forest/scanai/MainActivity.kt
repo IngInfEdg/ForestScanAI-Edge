@@ -25,9 +25,7 @@ import com.forest.scanai.data.export.CsvExporter
 import com.forest.scanai.data.location.LocationProvider
 import com.forest.scanai.domain.model.ScanSessionResult
 import com.forest.scanai.domain.model.ScanUiState
-import com.forest.scanai.presentation.ScanReviewViewModel
 import com.forest.scanai.presentation.ScanViewModel
-import com.forest.scanai.ui.ScanReview3DScreen
 import com.forest.scanai.ui.ScanScreen
 import com.forest.scanai.ui.theme.ForestScanAITheme
 import kotlinx.coroutines.launch
@@ -52,19 +50,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val reviewViewModel: ScanReviewViewModel by viewModels()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             ForestScanAITheme {
-                var currentScreen by remember { mutableStateOf("scan") }
-
                 MainScreen(
-                    currentScreen = currentScreen,
                     viewModel = viewModel,
-                    reviewViewModel = reviewViewModel,
                     onSaveReport = { uiState, result ->
                         lifecycleScope.launch {
                             val location = locationProvider.getCurrentLocation()
@@ -79,14 +71,6 @@ class MainActivity : ComponentActivity() {
                                 Toast.makeText(this@MainActivity, "Reporte guardado", Toast.LENGTH_LONG).show()
                             }
                         }
-                    },
-                    onBackToScan = {
-                        viewModel.reset()
-                        currentScreen = "scan"
-                    },
-                    onOpenReview = {
-                        reviewViewModel.setScanResult(it)
-                        currentScreen = "review"
                     }
                 )
             }
@@ -96,12 +80,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen(
-    currentScreen: String,
     viewModel: ScanViewModel,
-    reviewViewModel: ScanReviewViewModel,
-    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit,
-    onBackToScan: () -> Unit,
-    onOpenReview: (ScanSessionResult) -> Unit
+    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val context = LocalContext.current
     val permissions = arrayOf(
@@ -130,10 +110,7 @@ fun MainScreen(
     }
 
     if (permissionsGranted) {
-        when (currentScreen) {
-            "scan" -> ScanScreen(viewModel, onSaveReport, onOpenReview)
-            "review" -> ScanReview3DScreen(reviewViewModel, onBack = onBackToScan)
-        }
+        ScanScreen(viewModel, onSaveReport)
     } else {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

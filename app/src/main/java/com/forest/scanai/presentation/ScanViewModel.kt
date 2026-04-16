@@ -86,6 +86,18 @@ class ScanViewModel(
     private var lastLiveScanResult = com.forest.scanai.domain.model.ScanResult(0.0, emptyList())
     private var frameCounter = 0
 
+    private fun selectPilePreferredPoints(
+        detection: com.forest.scanai.domain.engine.PileDetectionResult,
+        fallbackPoints: List<Position>,
+        minPilePoints: Int
+    ): List<Position> {
+        return if (detection.pilePoints.size >= minPilePoints) {
+            detection.pilePoints
+        } else {
+            fallbackPoints
+        }
+    }
+
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
     }
@@ -118,11 +130,11 @@ class ScanViewModel(
 
         val currentPoints = points.toList()
         val detection = getDetectionSnapshot(currentPoints, observerPath.toList(), force = true)
-        val primaryPilePoints = if (detection.isRobust && detection.pilePoints.isNotEmpty()) {
-            detection.pilePoints
-        } else {
-            currentPoints
-        }
+        val primaryPilePoints = selectPilePreferredPoints(
+            detection = detection,
+            fallbackPoints = currentPoints,
+            minPilePoints = 120
+        )
 
         // Refinador opcional: GroundPileSegmenter queda como fallback para mejorar visualización 3D.
         val segmented = segmenter.segment(primaryPilePoints)
@@ -285,6 +297,23 @@ class ScanViewModel(
             } - (cloudQuality?.confidencePenalty ?: 0f)
         ).coerceIn(0.20f, 0.95f) * detection.detectionConfidence.coerceIn(0.45f, 1f)
 
+        val finalBoundingBox = computeBounds(refinedPilePoints)
+        val calibrationDebugInfo = detection.debugInfo + mapOf(
+            "raw_points" to currentPoints.size.toString(),
+            "accepted_points" to currentPoints.size.toString(),
+            "pile_points" to refinedPilePoints.size.toString(),
+            "ground_points" to refinedGroundPoints.size.toString(),
+            "bounding_box_final" to formatBounds(finalBoundingBox),
+            "max_height" to String.format("%.3f", maxHeight),
+            "p95_height" to String.format("%.3f", heightSummary?.p95Height ?: maxHeight),
+            "mean_height" to String.format("%.3f", heightSummary?.meanHeight ?: 0.0),
+            "volume_before_correction" to String.format("%.3f", result.volumeBeforeCorrection),
+            "volume_after_correction" to String.format("%.3f", result.volumeAfterCorrection),
+            "detection_confidence" to String.format("%.3f", detection.detectionConfidence),
+            "vertical_coverage_score" to String.format("%.3f", verticalCoverage.verticalCoverageScore),
+            "trajectory_quality_score" to String.format("%.3f", trajectoryQuality.trajectoryQualityScore)
+        ) + result.debugInfo
+
         _finalResult.value = ScanSessionResult(
             volume = result.volume,
             length = length,
@@ -318,7 +347,9 @@ class ScanViewModel(
             pileDetectionConfidence = detection.detectionConfidence,
             pileDetectionQuality = detection.quality.name,
             pileDetectionReasons = detection.reasons,
-            detectionDebugInfo = detection.debugInfo,
+            detectionDebugInfo = calibrationDebugInfo,
+            volumeBeforeCorrection = result.volumeBeforeCorrection,
+            volumeAfterCorrection = result.volumeAfterCorrection,
             appVersionName = appVersionName,
             appVersionCode = appVersionCode,
             appVersionDisplay = appVersionDisplay
@@ -362,11 +393,11 @@ class ScanViewModel(
 
         val currentPoints = points.toList()
         val detection = getDetectionSnapshot(currentPoints, observerPath.toList())
-        val measurementPoints = if (detection.isRobust && detection.pilePoints.size >= 120) {
-            detection.pilePoints
-        } else {
-            currentPoints
-        }
+        val measurementPoints = selectPilePreferredPoints(
+            detection = detection,
+            fallbackPoints = currentPoints,
+            minPilePoints = 80
+        )
 
         frameCounter++
         val calcResult = if (frameCounter % 2 == 0) {
@@ -377,7 +408,8 @@ class ScanViewModel(
         lastDetectionDebug = detection.debugInfo + mapOf(
             "raw_points" to processor.lastStats.rawPoints.toString(),
             "sampled_points" to processor.lastStats.sampledPoints.toString(),
-            "accepted_points_live" to processor.lastStats.acceptedPoints.toString()
+            "accepted_points_live" to processor.lastStats.acceptedPoints.toString(),
+            "measurement_points" to measurementPoints.size.toString()
         )
 
         val rawDist = sqrt(
@@ -407,11 +439,11 @@ class ScanViewModel(
 
         val currentPoints = points.toList()
         val detection = getDetectionSnapshot(currentPoints, observerPath.toList())
-        val evaluationPoints = if (detection.isRobust && detection.pilePoints.size >= 120) {
-            detection.pilePoints
-        } else {
-            currentPoints
-        }
+        val evaluationPoints = selectPilePreferredPoints(
+            detection = detection,
+            fallbackPoints = currentPoints,
+            minPilePoints = 80
+        )
 
         val coverageResult = coverageEvaluator.evaluateFromObserverPath(
             observerPath = observerPath.toList(),
@@ -563,6 +595,34 @@ class ScanViewModel(
             (a.x - b.x).toDouble().pow(2.0) +
                 (a.z - b.z).toDouble().pow(2.0)
         )
+    }
+
+    private data class Bounds3D(
+        val minX: Float,
+        val maxX: Float,
+        val minY: Float,
+        val maxY: Float,
+        val minZ: Float,
+        val maxZ: Float
+    )
+
+    private fun computeBounds(points: List<Position>): Bounds3D? {
+        if (points.isEmpty()) return null
+        return Bounds3D(
+            minX = points.minOf { it.x },
+            maxX = points.maxOf { it.x },
+            minY = points.minOf { it.y },
+            maxY = points.maxOf { it.y },
+            minZ = points.minOf { it.z },
+            maxZ = points.maxOf { it.z }
+        )
+    }
+
+    private fun formatBounds(bounds: Bounds3D?): String {
+        if (bounds == null) return "n/a"
+        return "x:[${"%.2f".format(bounds.minX)},${"%.2f".format(bounds.maxX)}] " +
+            "y:[${"%.2f".format(bounds.minY)},${"%.2f".format(bounds.maxY)}] " +
+            "z:[${"%.2f".format(bounds.minZ)},${"%.2f".format(bounds.maxZ)}]"
     }
 
     fun reset() {
