@@ -67,6 +67,18 @@ class VerticalCoverageEvaluatorTest {
         assertTrue("La tendencia reciente debe ser positiva", result.topCoverageTrend > 0f)
     }
 
+
+    @Test
+    fun sustainedTopImprovement_shouldPromoteToTopOk() {
+        val points = buildBandPoints(lower = 105, middle = 120, upper = 70)
+        val recent = listOf(0.40f, 0.48f, 0.55f, 0.61f, 0.65f, 0.67f)
+
+        val result = evaluator.evaluate(points, recentTopCoverageScores = recent)
+
+        assertTrue("Con mejora sostenida la cima debe quedar en TOP_OK", result.topCoverageState == TopCoverageState.TOP_OK)
+        assertTrue("Top coverage debería ser suficientemente alto", result.topCoverageScore >= 0.60f)
+    }
+
     private fun buildBandPoints(lower: Int, middle: Int, upper: Int): List<Position> {
         val points = mutableListOf<Position>()
 

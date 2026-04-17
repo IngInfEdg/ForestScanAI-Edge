@@ -346,10 +346,15 @@ class ScanViewModel(
             "max_height" to String.format("%.3f", maxHeight),
             "p95_height" to String.format("%.3f", heightSummary?.p95Height ?: maxHeight),
             "mean_height" to String.format("%.3f", heightSummary?.meanHeight ?: 0.0),
-            "volume_before_correction" to String.format("%.3f", result.volumeBeforeCorrection),
-            "volume_after_correction" to String.format("%.3f", result.volumeAfterCorrection),
+            "volume_geometric_raw" to String.format("%.3f", result.geometricVolumeRaw),
+            "volume_geometric_corrected" to String.format("%.3f", result.geometricVolumeCorrected),
+            "volume_stereo_smoothed" to String.format("%.3f", result.stereoVolumeSmoothed),
+            "volume_net_estimate" to String.format("%.3f", result.netVolumeEstimate),
             "detection_confidence" to String.format("%.3f", detection.detectionConfidence),
+            "detection_reasons" to detection.reasons.joinToString(" | "),
             "vertical_coverage_score" to String.format("%.3f", verticalCoverage.verticalCoverageScore),
+            "vertical_weak_bands" to verticalCoverage.weakBands.joinToString("|") { it.name },
+            "vertical_reasons" to verticalCoverage.reasons.joinToString(" | "),
             "top_coverage_score" to String.format("%.3f", verticalCoverage.topCoverageScore),
             "top_point_count" to verticalCoverage.topPointCount.toString(),
             "top_band_density" to String.format("%.3f", verticalCoverage.topBandDensity),
@@ -367,7 +372,12 @@ class ScanViewModel(
             "reference_observed_m" to String.format("%.3f", referenceMeasurement?.observedLengthMeters ?: 0.0),
             "reference_relative_error" to String.format("%.3f", referenceMeasurement?.relativeError ?: 0.0),
             "reference_status" to (referenceMeasurement?.status?.name ?: "NOT_CONFIGURED"),
-            "auto_completion_candidate" to stateDecision.autoCompletionCandidate.toString()
+            "reference_notes" to (referenceMeasurement?.notes?.joinToString(" | ") ?: ""),
+            "reference_observation_source" to if (manualReferenceObservedLengthMeters == null) "NOT_CAPTURED" else "MANUAL",
+            "auto_completion_candidate" to stateDecision.autoCompletionCandidate.toString(),
+            "volume_is_stable" to volumeStability.isStable.toString(),
+            "recent_useful_points_growth_ratio" to String.format("%.3f", computeRecentUsefulPointGrowthRatio()),
+            "recent_volume_delta_ratio" to String.format("%.3f", computeRecentVolumeDeltaRatio())
         ) + result.debugInfo
 
         _finalResult.value = ScanSessionResult(
@@ -404,8 +414,10 @@ class ScanViewModel(
             pileDetectionQuality = detection.quality.name,
             pileDetectionReasons = detection.reasons,
             detectionDebugInfo = calibrationDebugInfo,
-            volumeBeforeCorrection = result.volumeBeforeCorrection,
-            volumeAfterCorrection = result.volumeAfterCorrection,
+            geometricVolumeRaw = result.geometricVolumeRaw,
+            geometricVolumeCorrected = result.geometricVolumeCorrected,
+            stereoVolumeSmoothed = result.stereoVolumeSmoothed,
+            netVolumeEstimate = result.netVolumeEstimate,
             referenceBarMeasurement = referenceMeasurement,
             scaleValidationScore = referenceMeasurement?.scaleValidationScore ?: 0f,
             volumeStabilityScore = volumeStability.stabilityScore.toFloat(),
@@ -478,8 +490,8 @@ class ScanViewModel(
 
         _uiState.update {
             it.copy(
-                stereoVolume = calcResult.volume,
-                netVolume = calcResult.volume * 0.45,
+                stereoVolume = calcResult.stereoVolumeSmoothed,
+                netVolume = calcResult.netVolumeEstimate,
                 distance = if (it.distance == 0.0) rawDist else it.distance + params.emaAlpha * (rawDist - it.distance),
                 topPoints = calcResult.topPoints
             )

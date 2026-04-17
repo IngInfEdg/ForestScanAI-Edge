@@ -51,11 +51,17 @@ data class ScanSessionResult(
     val pileDetectionQuality: String = "FALLBACK",
     val pileDetectionReasons: List<String> = emptyList(),
     val detectionDebugInfo: Map<String, String> = emptyMap(),
-    val volumeBeforeCorrection: Double = 0.0,
-    val volumeAfterCorrection: Double = 0.0,
+    val geometricVolumeRaw: Double = 0.0,
+    val geometricVolumeCorrected: Double = 0.0,
+    val stereoVolumeSmoothed: Double = 0.0,
+    val netVolumeEstimate: Double = 0.0,
     val referenceBarMeasurement: ReferenceBarMeasurement? = null,
     val scaleValidationScore: Float = 0f,
     val volumeStabilityScore: Float = 0f,
+
+    // Backward compatibility for existing callers/exports.
+    val volumeBeforeCorrection: Double get() = geometricVolumeRaw
+    val volumeAfterCorrection: Double get() = geometricVolumeCorrected
 
     val appVersionName: String = "",
     val appVersionCode: Long = 0,

@@ -65,7 +65,7 @@ class GroundPileSegmenter(
             val ys = slices[i].map { it.y }.sorted()
             if (ys.size >= 12) {
                 sliceGroundLevels[i] = percentile(ys, 0.10f)
-                slicePileBases[i] = percentile(ys, 0.22f)
+                slicePileBases[i] = percentile(ys, 0.20f)
             }
         }
 
@@ -91,7 +91,7 @@ class GroundPileSegmenter(
                 val cross = axisEstimator.projectCross(point, axis)
                 val relativeHeight = (point.y - groundRef).coerceAtLeast(0f)
 
-                val isPile = point.y >= pileBaseRef + 0.10f
+                val isPile = point.y >= pileBaseRef + 0.08f
                 val pointClass = if (isPile) PointClass.PILE else PointClass.GROUND
 
                 classified += ClassifiedPoint(

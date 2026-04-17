@@ -72,8 +72,9 @@ class PointCloudProcessor(private val params: ScanParams) {
                 }
 
                 val adaptiveConfidenceThreshold = when {
-                    y - cameraPos.y > 1.6f -> (params.confidenceThreshold * 0.72f)
-                    y - cameraPos.y > 0.9f -> (params.confidenceThreshold * 0.80f)
+                    y - cameraPos.y > 1.8f -> (params.confidenceThreshold * 0.68f)
+                    y - cameraPos.y > 1.0f -> (params.confidenceThreshold * 0.78f)
+                    y - cameraPos.y < -0.6f -> (params.confidenceThreshold * 0.76f)
                     else -> (params.confidenceThreshold * 0.85f)
                 }
 
@@ -102,12 +103,12 @@ class PointCloudProcessor(private val params: ScanParams) {
                 }
 
                 // Menos agresivo para conservar corona/base y delegar limpieza a la segmentación.
-                if (absVerticalDelta > 4.5f) {
+                if (absVerticalDelta > 4.9f) {
                     rejectedVertical++
                     continue
                 }
 
-                if (horizontalDistance > 5.0f && confidence < 0.45f && verticalDelta < 1.8f) {
+                if (horizontalDistance > 5.0f && confidence < 0.42f && verticalDelta < 2.0f) {
                     rejectedNoise++
                     continue
                 }

@@ -7,7 +7,7 @@ class MeasurementStateEvaluator(
     private val acceptableTrajectoryThreshold: Float = 0.60f,
     private val completeVerticalThreshold: Float = 0.75f,
     private val acceptableVerticalThreshold: Float = 0.60f,
-    private val completeTopCoverageThreshold: Float = 0.62f
+    private val completeTopCoverageThreshold: Float = 0.60f
 ) {
 
     fun evaluate(input: MeasurementStateInput): MeasurementStateDecision {
@@ -23,7 +23,7 @@ class MeasurementStateEvaluator(
             blockers += "La cobertura vertical aún es insuficiente; falta capturar base y corona con más detalle."
             level = level.capAt(CompletenessLevel.PARTIAL)
         }
-        if (input.topCoverageScore < 0.52f) {
+        if (input.topCoverageScore < 0.50f && input.topCoverageState != TopCoverageState.TOP_IMPROVING) {
             blockers += "Aún faltan puntos de corona; inclina el celular hacia la cima y mantén la parte alta al centro."
             level = level.capAt(CompletenessLevel.PARTIAL)
         }
@@ -43,7 +43,7 @@ class MeasurementStateEvaluator(
                 blockers += "Cobertura vertical insuficiente para completar (base, mitad y corona)."
                 level = level.capAt(CompletenessLevel.ACCEPTABLE)
             }
-            if (input.topCoverageScore < completeTopCoverageThreshold) {
+            if (input.topCoverageScore < completeTopCoverageThreshold && input.topCoverageState != TopCoverageState.TOP_OK) {
                 blockers += "La corona aún no está bien muestreada para marcar medición completa."
                 level = level.capAt(CompletenessLevel.ACCEPTABLE)
             }
@@ -63,7 +63,7 @@ class MeasurementStateEvaluator(
             input.coverageRatio >= 0.95f &&
                 input.coveredSectors >= 11 &&
                 input.verticalCoverageScore >= 0.72f &&
-                input.topCoverageScore >= 0.62f &&
+                input.topCoverageScore >= 0.60f &&
                 input.trajectoryQualityScore >= 0.72f &&
                 input.isVolumeStable &&
                 input.recentUsefulPointGrowthRatio <= 0.035f &&
@@ -85,6 +85,8 @@ class MeasurementStateEvaluator(
             input.missingLowerBand -> "Falta capturar mejor la base."
             input.topCoverageState == TopCoverageState.TOP_MISSING && input.missingUpperBand ->
                 "Inclina el celular hacia la cima de la pila."
+            input.topCoverageState == TopCoverageState.TOP_IMPROVING && input.topCoverageScore >= 0.56f ->
+                "La cima ya es usable; mantén unos segundos para consolidar."
             input.topCoverageState == TopCoverageState.TOP_IMPROVING ->
                 "La cima está mejorando; mantén el encuadre unos segundos."
             input.topCoverageScore < 0.55f -> "Da un paso atrás para capturar la corona completa."

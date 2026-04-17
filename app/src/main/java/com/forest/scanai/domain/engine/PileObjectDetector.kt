@@ -49,6 +49,15 @@ data class PileCluster(
     val estimatedVolumeProxy: Float
 )
 
+data class DetectionConfidenceBreakdown(
+    val dominanceScore: Float,
+    val heightScore: Float,
+    val compactnessScore: Float,
+    val observerConsistencyScore: Float,
+    val groundSeparationScore: Float,
+    val confidence: Float
+)
+
 data class PileDetectionResult(
     val groundPoints: List<Position>,
     val nonGroundPoints: List<Position>,
@@ -142,37 +151,41 @@ class PileObjectDetector(
 
         val selected = clusterScores.firstOrNull()
         val reasons = mutableListOf<String>()
-        val confidenceParts = mutableListOf<Float>()
+        val confidenceBreakdown = computeConfidenceBreakdown(
+            selected = selected,
+            allClusters = clusterScores,
+            totalPoints = points.size,
+            nonGroundPoints = nonGround.size,
+            groundPoints = ground.size,
+            observerPath = observerPath
+        )
 
         if (selected == null) {
             reasons += "No se detectó cluster dominante en puntos no-suelo."
-            confidenceParts += 0.2f
         } else {
-            val sizeRatio = selected.points.size / points.size.toFloat()
-            val height = selected.boundingInfo.height
-            confidenceParts += (0.35f + min(0.45f, sizeRatio)).coerceIn(0f, 0.8f)
-            confidenceParts += (height / 2.0f).coerceIn(0f, 0.2f)
-
             if (selected.points.size < minClusterSize) {
                 reasons += "Cluster principal pequeño (${selected.points.size} puntos)."
             }
-            if (height < 0.35f) {
+            if (selected.boundingInfo.height < 0.35f) {
                 reasons += "Rango vertical bajo para una pila robusta."
+            }
+            if (confidenceBreakdown.dominanceScore < 0.52f) {
+                reasons += "La pila dominante no se separa lo suficiente de otros clusters."
+            }
+            if (confidenceBreakdown.groundSeparationScore < 0.45f) {
+                reasons += "Separación suelo/no-suelo incierta para esta nube."
+            }
+            if (confidenceBreakdown.observerConsistencyScore < 0.45f && observerPath.size >= 4) {
+                reasons += "La observación del cluster dominante es poco consistente respecto al recorrido."
             }
         }
 
-        val noisyGroundRatio = ground.size / points.size.toFloat()
-        if (noisyGroundRatio < 0.15f || noisyGroundRatio > 0.9f) {
-            reasons += "Separación suelo/no-suelo incierta para esta nube."
-            confidenceParts += 0.10f
-        }
-
-        val confidence = confidenceParts.average().toFloat().coerceIn(0.1f, 0.95f)
+        val confidence = confidenceBreakdown.confidence
         val quality = when {
             selected == null -> PileDetectionQuality.FALLBACK
-            confidence >= 0.75f && selected.points.size >= minClusterSize -> PileDetectionQuality.HIGH
-            confidence >= 0.55f -> PileDetectionQuality.MEDIUM
-            confidence >= 0.35f -> PileDetectionQuality.LOW
+            confidence >= 0.76f && selected.points.size >= minClusterSize -> PileDetectionQuality.HIGH
+            confidence >= 0.58f -> PileDetectionQuality.MEDIUM
+            confidence >= 0.40f -> PileDetectionQuality.LOW
             else -> PileDetectionQuality.FALLBACK
         }
 
@@ -199,6 +212,11 @@ class PileObjectDetector(
             "estimated_height" to String.format("%.3f", bounds?.height ?: 0f),
             "bounding_box" to formatBounds(bounds),
             "confidence" to String.format("%.3f", confidence),
+            "dominance_score" to String.format("%.3f", confidenceBreakdown.dominanceScore),
+            "height_score" to String.format("%.3f", confidenceBreakdown.heightScore),
+            "compactness_score" to String.format("%.3f", confidenceBreakdown.compactnessScore),
+            "observer_consistency_score" to String.format("%.3f", confidenceBreakdown.observerConsistencyScore),
+            "ground_separation_score" to String.format("%.3f", confidenceBreakdown.groundSeparationScore),
             "ground_plane_fit_error" to String.format("%.4f", plane.fitError),
             "ground_method" to plane.method,
             "top_band_points" to countTopBandPoints(pilePoints).toString()
@@ -431,6 +449,74 @@ class PileObjectDetector(
             }
         }
         return neighbors
+    }
+
+    private fun computeConfidenceBreakdown(
+        selected: PileCluster?,
+        allClusters: List<PileCluster>,
+        totalPoints: Int,
+        nonGroundPoints: Int,
+        groundPoints: Int,
+        observerPath: List<Position>
+    ): DetectionConfidenceBreakdown {
+        if (selected == null) {
+            return DetectionConfidenceBreakdown(
+                dominanceScore = 0f,
+                heightScore = 0f,
+                compactnessScore = 0f,
+                observerConsistencyScore = 0f,
+                groundSeparationScore = 0f,
+                confidence = 0.20f
+            )
+        }
+
+        val sizeRatioTotal = selected.points.size / totalPoints.toFloat().coerceAtLeast(1f)
+        val sizeRatioNonGround = selected.points.size / nonGroundPoints.toFloat().coerceAtLeast(1f)
+        val nextClusterSize = allClusters.getOrNull(1)?.points?.size?.toFloat() ?: 0f
+        val dominanceMargin = (selected.points.size - nextClusterSize) / selected.points.size.toFloat().coerceAtLeast(1f)
+        val dominanceScore = (
+            sizeRatioNonGround.coerceIn(0f, 1f) * 0.65f +
+                dominanceMargin.coerceIn(0f, 1f) * 0.35f
+            ).coerceIn(0f, 1f)
+
+        val height = selected.boundingInfo.height
+        val heightScore = (height / 1.65f).coerceIn(0f, 1f)
+        val footprint = (selected.boundingInfo.width * selected.boundingInfo.length).coerceAtLeast(1e-4f)
+        val compactnessScore = (selected.points.size / footprint / 260f).coerceIn(0f, 1f)
+
+        val observerConsistencyScore = if (observerPath.isEmpty()) {
+            0.62f
+        } else {
+            val observerCenter = centroid(observerPath)
+            val d = distance2d(observerCenter, selected.centroid)
+            exp((-d / 2.8f).toDouble()).toFloat().coerceIn(0f, 1f)
+        }
+
+        val groundRatio = groundPoints / totalPoints.toFloat().coerceAtLeast(1f)
+        val nonGroundRatio = nonGroundPoints / totalPoints.toFloat().coerceAtLeast(1f)
+        val groundSeparationScore = when {
+            groundRatio in 0.22f..0.72f && nonGroundRatio in 0.20f..0.78f -> 1.0f
+            groundRatio in 0.15f..0.85f -> 0.7f
+            else -> 0.3f
+        }
+
+        val confidence = (
+            dominanceScore * 0.34f +
+                heightScore * 0.20f +
+                compactnessScore * 0.15f +
+                observerConsistencyScore * 0.11f +
+                groundSeparationScore * 0.20f +
+                sizeRatioTotal.coerceIn(0f, 1f) * 0.08f
+            ).coerceIn(0.12f, 0.95f)
+
+        return DetectionConfidenceBreakdown(
+            dominanceScore = dominanceScore,
+            heightScore = heightScore,
+            compactnessScore = compactnessScore,
+            observerConsistencyScore = observerConsistencyScore,
+            groundSeparationScore = groundSeparationScore,
+            confidence = confidence
+        )
     }
 
     private fun solve3x3(matrix: Array<DoubleArray>, vector: DoubleArray): DoubleArray? {

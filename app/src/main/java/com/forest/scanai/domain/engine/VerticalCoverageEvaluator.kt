@@ -7,9 +7,9 @@ import kotlin.math.sqrt
 
 class VerticalCoverageEvaluator(
     private val minPointsForEvaluation: Int = 180,
-    private val middleDominanceThreshold: Float = 0.72f,
-    private val bandWeakThreshold: Float = 0.12f,
-    private val minimumTopCoverageScore: Float = 0.55f
+    private val middleDominanceThreshold: Float = 0.70f,
+    private val bandWeakThreshold: Float = 0.11f,
+    private val minimumTopCoverageScore: Float = 0.52f
 ) {
 
     fun evaluate(
@@ -62,7 +62,7 @@ class VerticalCoverageEvaluator(
         val total = pilePoints.size.toFloat()
         val ratios = counts.mapValues { (_, value) -> value / total }
         val coveredBands = counts.filterValues { it > 0 }.keys
-        val weakBands = ratios.filterValues { it in 0f..bandWeakThreshold }.keys
+        val weakBands = ratios.filterValues { it <= bandWeakThreshold }.keys
         val dominant = ratios.maxByOrNull { it.value }?.key
         val topMetrics = computeTopCoverageMetrics(
             pilePoints = pilePoints,
@@ -70,7 +70,7 @@ class VerticalCoverageEvaluator(
             maxY = maxY,
             upperBandRatio = ratios.getValue(VerticalBand.UPPER)
         )
-        val temporalSeries = (recentTopCoverageScores.takeLast(7) + topMetrics.score).takeLast(8)
+        val temporalSeries = (recentTopCoverageScores.takeLast(9) + topMetrics.score).takeLast(10)
         val topCoverageTrend = computeTrend(temporalSeries)
         val topTemporalStability = computeTemporalStability(temporalSeries)
         val topCoverageState = classifyTopCoverageState(
@@ -102,53 +102,69 @@ class VerticalCoverageEvaluator(
         val ideal = 1f / 3f
         val maxDeviation = ratios.values.maxOf { abs(it - ideal) }
         val balanceScore = (1f - (maxDeviation / ideal).coerceIn(0f, 1f)).coerceIn(0f, 1f)
-        val spreadScore = ((heightRange - 0.35f) / 0.85f).coerceIn(0f, 1f)
-        val observerHeightScore = if (observerPath.size < 4) 0.6f else (observerHeightRange / 0.9f).coerceIn(0f, 1f)
-        val observerDistanceScore = if (observerPath.size < 4) 0.6f else (observerDistanceVariation / 0.16f).coerceIn(0f, 1f)
+        val spreadScore = ((heightRange - 0.30f) / 0.90f).coerceIn(0f, 1f)
+
+        val lowerRatio = ratios.getValue(VerticalBand.LOWER)
+        val middleRatio = ratios.getValue(VerticalBand.MIDDLE)
+        val upperRatio = ratios.getValue(VerticalBand.UPPER)
+        val lowerSupportScore = (lowerRatio / 0.22f).coerceIn(0f, 1f)
+        val upperSupportScore = (upperRatio / 0.20f).coerceIn(0f, 1f)
+
+        val observerHeightScore = if (observerPath.size < 4) 0.65f else (observerHeightRange / 0.85f).coerceIn(0f, 1f)
+        val observerDistanceScore = if (observerPath.size < 4) 0.65f else (observerDistanceVariation / 0.15f).coerceIn(0f, 1f)
         val observerDiversityScore = ((observerHeightScore + observerDistanceScore) / 2f).coerceIn(0f, 1f)
 
         var score = (
-            coveredScore * 0.45f +
-            balanceScore * 0.30f +
-            spreadScore * 0.15f +
-            observerDiversityScore * 0.10f
+            coveredScore * 0.30f +
+                balanceScore * 0.20f +
+                spreadScore * 0.15f +
+                lowerSupportScore * 0.13f +
+                upperSupportScore * 0.12f +
+                topMetrics.score * 0.10f
             ).coerceIn(0f, 1f)
-        score = (score * 0.85f + topMetrics.score * 0.15f).coerceIn(0f, 1f)
+        score = (score * 0.92f + observerDiversityScore * 0.08f).coerceIn(0f, 1f)
 
         val penalties = mutableSetOf<VerticalCoveragePenalty>()
 
-        if (ratios.getValue(VerticalBand.LOWER) <= bandWeakThreshold) {
+        if (lowerRatio <= bandWeakThreshold) {
             penalties += VerticalCoveragePenalty.MISSING_LOWER_BAND
-            score -= 0.22f
+            score -= 0.16f
         }
 
-        if (ratios.getValue(VerticalBand.UPPER) <= bandWeakThreshold) {
+        if (upperRatio <= bandWeakThreshold) {
             penalties += VerticalCoveragePenalty.MISSING_UPPER_BAND
-            score -= 0.24f
+            score -= 0.18f
         }
         if (topMetrics.score < minimumTopCoverageScore) {
             penalties += VerticalCoveragePenalty.TOP_SURFACE_SPARSE
-            score -= 0.18f
+            score -= 0.12f
         }
 
-        if (ratios.getValue(VerticalBand.MIDDLE) >= middleDominanceThreshold) {
+        if (middleRatio >= middleDominanceThreshold) {
             penalties += VerticalCoveragePenalty.MIDDLE_DOMINANCE
-            score -= 0.30f
+            score -= 0.20f
         }
 
-        if (heightRange < 0.45f) {
+        if (heightRange < 0.40f) {
             penalties += VerticalCoveragePenalty.INSUFFICIENT_VERTICAL_SPREAD
-            score -= 0.15f
+            score -= 0.12f
         }
 
-        if (observerPath.size >= 4 && observerHeightRange < 0.22f) {
+        if (observerPath.size >= 4 && observerHeightRange < 0.20f) {
             penalties += VerticalCoveragePenalty.SINGLE_HEIGHT_BAND_OBSERVER
-            score -= 0.10f
+            score -= 0.08f
         }
 
         if (observerPath.size >= 4 && observerDistanceVariation < 0.05f) {
             penalties += VerticalCoveragePenalty.CONSTANT_DISTANCE_OBSERVER
-            score -= 0.08f
+            score -= 0.06f
+        }
+
+        if (lowerRatio in (bandWeakThreshold + 0.001f)..0.18f) {
+            penalties += VerticalCoveragePenalty.LOWER_BAND_IMPROVING
+        }
+        if (upperRatio in (bandWeakThreshold + 0.001f)..0.20f) {
+            penalties += VerticalCoveragePenalty.UPPER_BAND_IMPROVING
         }
 
         val reasons = penalties.map { it.humanReadable }
@@ -181,9 +197,9 @@ class VerticalCoverageEvaluator(
         upperBandRatio: Float
     ): TopCoverageMetrics {
         val heightRange = (maxY - minY).coerceAtLeast(1e-4f)
-        val topBandThreshold = maxY - heightRange * 0.20f
+        val topBandThreshold = maxY - heightRange * 0.18f
         val topPoints = pilePoints.filter { it.y >= topBandThreshold }
-        if (topPoints.size < 18) {
+        if (topPoints.size < 16) {
             return TopCoverageMetrics(score = 0f, pointCount = topPoints.size, bandDensity = 0f)
         }
 
@@ -203,17 +219,17 @@ class VerticalCoverageEvaluator(
         }
 
         val occupancyScore = (occupiedBins.size / (bins * bins).toFloat()).coerceIn(0f, 1f)
-        val expectedTopPoints = (pilePoints.size * 0.18f).coerceAtLeast(30f)
+        val expectedTopPoints = (pilePoints.size * 0.14f).coerceAtLeast(24f)
         val densityScore = (topPoints.size / expectedTopPoints).coerceIn(0f, 1f)
-        val upperRatioScore = (upperBandRatio / 0.22f).coerceIn(0f, 1f)
+        val upperRatioScore = (upperBandRatio / 0.20f).coerceIn(0f, 1f)
         val area = (spanX * spanZ).coerceAtLeast(1e-4f)
         val topBandDensity = (topPoints.size / area).coerceAtMost(240f)
-        val bandDensityScore = (topBandDensity / 40f).coerceIn(0f, 1f)
+        val bandDensityScore = (topBandDensity / 35f).coerceIn(0f, 1f)
         val score = (
-            occupancyScore * 0.35f +
-                densityScore * 0.25f +
-                upperRatioScore * 0.15f +
-                bandDensityScore * 0.25f
+            occupancyScore * 0.34f +
+                densityScore * 0.26f +
+                upperRatioScore * 0.14f +
+                bandDensityScore * 0.26f
             ).coerceIn(0f, 1f)
 
         return TopCoverageMetrics(score = score, pointCount = topPoints.size, bandDensity = topBandDensity)
@@ -226,10 +242,10 @@ class VerticalCoverageEvaluator(
         trend: Float,
         stability: Float
     ): TopCoverageState {
-        if (score >= 0.68f && topPointCount >= 24 && topBandDensity >= 14f && stability >= 0.45f) {
+        if (score >= 0.64f && topPointCount >= 22 && topBandDensity >= 12f && stability >= 0.28f) {
             return TopCoverageState.TOP_OK
         }
-        if (score >= 0.42f && topPointCount >= 12 && (trend >= 0.03f || stability >= 0.30f)) {
+        if (score >= 0.44f && topPointCount >= 12 && (trend >= 0.01f || stability >= 0.24f)) {
             return TopCoverageState.TOP_IMPROVING
         }
         return TopCoverageState.TOP_MISSING
@@ -260,7 +276,9 @@ enum class VerticalBand {
 enum class VerticalCoveragePenalty(val humanReadable: String) {
     TOO_FEW_POINTS("Faltan puntos útiles para validar cobertura vertical."),
     MISSING_LOWER_BAND("Falta capturar mejor la base o límite con el suelo."),
+    LOWER_BAND_IMPROVING("La base mejora, pero aún conviene capturar más puntos bajos."),
     MISSING_UPPER_BAND("Inclina el celular hacia la cima de la pila para capturar mejor la corona."),
+    UPPER_BAND_IMPROVING("La corona mejora, pero aún conviene sostener el encuadre superior."),
     TOP_SURFACE_SPARSE("Aún faltan puntos en la parte más alta; da un paso atrás y centra la cima en la vista."),
     MIDDLE_DOMINANCE("La nube está concentrada en la franja media; varía ángulo y altura del celular."),
     INSUFFICIENT_VERTICAL_SPREAD("Cobertura vertical insuficiente entre base y corona."),
@@ -291,14 +309,14 @@ data class VerticalCoverageResult(
         get() = VerticalCoveragePenalty.MIDDLE_DOMINANCE in penaltyFlags
 
     val supportsComplete: Boolean
-        get() = verticalCoverageScore >= 0.75f &&
+        get() = verticalCoverageScore >= 0.72f &&
             topCoverageScore >= 0.60f &&
             VerticalCoveragePenalty.MISSING_LOWER_BAND !in penaltyFlags &&
             VerticalCoveragePenalty.MISSING_UPPER_BAND !in penaltyFlags &&
             weakBands.size <= 1
 
     val supportsAcceptable: Boolean
-        get() = verticalCoverageScore >= 0.60f && weakBands.size <= 1
+        get() = verticalCoverageScore >= 0.56f && weakBands.size <= 1
 }
 
 enum class TopCoverageState {

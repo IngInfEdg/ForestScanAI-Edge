@@ -25,7 +25,11 @@ class ReferenceScaleValidator(
                 scaleRatio = 1.0,
                 scaleValidationScore = 0f,
                 status = ReferenceMeasurementStatus.NOT_PROVIDED,
-                notes = listOf("Referencia configurada pero no observada todavía.")
+                notes = listOf(
+                    "Referencia configurada pero no observada todavía.",
+                    "Estado NOT_PROVIDED: falta registrar longitud observada de la barra de 2m.",
+                    "Siguiente paso sugerido: capturar una observación manual para habilitar validación de escala."
+                )
             )
         }
 

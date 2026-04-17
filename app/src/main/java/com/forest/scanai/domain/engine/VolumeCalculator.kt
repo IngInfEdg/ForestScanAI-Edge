@@ -83,26 +83,33 @@ class VolumeCalculator(
         val correctedVolume = rawVolume * edgeRecoveryFactor
 
         val alpha = if (abs(correctedVolume - lastCalculatedVolume) < correctedVolume * 0.08) 0.07 else 0.04
-        val finalVolume = if (lastCalculatedVolume == 0.0) {
+        val smoothedStereoVolume = if (lastCalculatedVolume == 0.0) {
             correctedVolume
         } else {
             lastCalculatedVolume + alpha * (correctedVolume - lastCalculatedVolume)
         }
+        val netVolumeEstimate = smoothedStereoVolume * 0.45
 
-        lastCalculatedVolume = finalVolume
+        lastCalculatedVolume = smoothedStereoVolume
 
         return ScanResult(
-            volume = finalVolume.coerceAtLeast(0.0),
+            volume = smoothedStereoVolume.coerceAtLeast(0.0),
             topPoints = smoothedTopPoints,
-            volumeBeforeCorrection = rawVolume.coerceAtLeast(0.0),
-            volumeAfterCorrection = correctedVolume.coerceAtLeast(0.0),
+            geometricVolumeRaw = rawVolume.coerceAtLeast(0.0),
+            geometricVolumeCorrected = correctedVolume.coerceAtLeast(0.0),
+            stereoVolumeSmoothed = smoothedStereoVolume.coerceAtLeast(0.0),
+            netVolumeEstimate = netVolumeEstimate.coerceAtLeast(0.0),
             debugInfo = mapOf(
                 "volume_input_points" to points.size.toString(),
                 "volume_slices_total" to numSlices.toString(),
                 "volume_slices_useful" to usefulSlices.toString(),
                 "volume_slice_ratio" to String.format("%.3f", usefulSliceRatio),
                 "volume_edge_recovery_factor" to String.format("%.3f", edgeRecoveryFactor),
-                "volume_temporal_alpha" to String.format("%.3f", alpha)
+                "volume_temporal_alpha" to String.format("%.3f", alpha),
+                "volume_geometric_raw" to String.format("%.3f", rawVolume),
+                "volume_geometric_corrected" to String.format("%.3f", correctedVolume),
+                "volume_stereo_smoothed" to String.format("%.3f", smoothedStereoVolume),
+                "volume_net_estimate" to String.format("%.3f", netVolumeEstimate)
             )
         )
     }
