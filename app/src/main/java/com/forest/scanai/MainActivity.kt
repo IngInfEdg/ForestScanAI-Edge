@@ -1,6 +1,7 @@
 package com.forest.scanai
 
 import android.Manifest
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -57,18 +58,21 @@ class MainActivity : ComponentActivity() {
             ForestScanAITheme {
                 MainScreen(
                     viewModel = viewModel,
-                    onSaveReport = { uiState, result ->
+                    onSaveReportToUri = { destinationUri, uiState, result ->
                         lifecycleScope.launch {
                             val location = locationProvider.getCurrentLocation()
-                            val path = csvExporter.saveReport(
+                            val saved = csvExporter.saveReportToUri(
+                                destinationUri = destinationUri,
                                 uiState = uiState,
                                 result = result,
                                 appVersionDisplay = appVersionProvider.displayVersion,
                                 lat = location?.latitude ?: 0.0,
                                 lon = location?.longitude ?: 0.0
                             )
-                            if (path != null) {
+                            if (saved) {
                                 Toast.makeText(this@MainActivity, "Reporte guardado", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this@MainActivity, "No se pudo guardar el CSV", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
@@ -81,7 +85,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     viewModel: ScanViewModel,
-    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
+    onSaveReportToUri: (Uri, ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val context = LocalContext.current
     val permissions = arrayOf(
@@ -97,6 +101,17 @@ fun MainScreen(
             }
         )
     }
+    val csvExporter = remember(context) { CsvExporter(context) }
+    var pendingCsvRequest by remember { mutableStateOf<Pair<ScanUiState, ScanSessionResult?>?>(null) }
+    val createCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val pending = pendingCsvRequest
+        if (uri != null && pending != null) {
+            onSaveReportToUri(uri, pending.first, pending.second)
+        }
+        pendingCsvRequest = null
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -110,7 +125,13 @@ fun MainScreen(
     }
 
     if (permissionsGranted) {
-        ScanScreen(viewModel, onSaveReport)
+        ScanScreen(
+            viewModel = viewModel,
+            onRequestSaveCsv = { uiState, result ->
+                pendingCsvRequest = uiState to result
+                createCsvLauncher.launch(csvExporter.buildSuggestedFileName())
+            }
+        )
     } else {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

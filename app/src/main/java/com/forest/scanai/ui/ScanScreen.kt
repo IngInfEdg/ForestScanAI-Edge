@@ -46,7 +46,7 @@ import java.util.Locale
 @Composable
 fun ScanScreen(
     viewModel: ScanViewModel,
-    onSaveReport: (ScanUiState, ScanSessionResult?) -> Unit
+    onRequestSaveCsv: (ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val finalResult by viewModel.finalResult.collectAsState()
@@ -179,7 +179,7 @@ fun ScanScreen(
                         }
 
                         Button(
-                            onClick = { onSaveReport(uiState, finalResult) },
+                            onClick = { onRequestSaveCsv(uiState, finalResult) },
                             enabled = uiState.stereoVolume > 0,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                         ) {
@@ -249,14 +249,14 @@ fun ScanScreen(
                         }
                     } else {
                         Button(
-                            onClick = { onSaveReport(uiState, finalResult) },
+                            onClick = { onRequestSaveCsv(uiState, finalResult) },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))
                         ) {
                             Text("Guardar revisión")
                         }
                     }
                     Button(
-                        onClick = { onSaveReport(uiState, finalResult) },
+                        onClick = { onRequestSaveCsv(uiState, finalResult) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                     ) {
                         Text("Guardar CSV")

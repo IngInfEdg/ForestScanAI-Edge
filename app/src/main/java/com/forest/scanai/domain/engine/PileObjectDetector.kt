@@ -320,12 +320,25 @@ class PileObjectDetector(
         val bounds = selectedCluster?.boundingInfo ?: return fallbackPoints
         val base = selectedCluster.points.toMutableList()
         val topThreshold = bounds.maxY - bounds.height * 0.18f
+        val lowerRetentionThreshold = bounds.minY + bounds.height * 0.06f
         val extraTopPoints = nonGroundPoints.filter { point ->
             point.y >= topThreshold &&
                 point.x in (bounds.minX - 0.35f)..(bounds.maxX + 0.35f) &&
                 point.z in (bounds.minZ - 0.35f)..(bounds.maxZ + 0.35f)
         }
+        val extraEdgePoints = nonGroundPoints.filter { point ->
+            point.y >= lowerRetentionThreshold &&
+                point.x in (bounds.minX - 0.45f)..(bounds.maxX + 0.45f) &&
+                point.z in (bounds.minZ - 0.45f)..(bounds.maxZ + 0.45f) &&
+                (
+                    point.x <= bounds.minX + 0.25f ||
+                        point.x >= bounds.maxX - 0.25f ||
+                        point.z <= bounds.minZ + 0.25f ||
+                        point.z >= bounds.maxZ - 0.25f
+                    )
+        }
         base += extraTopPoints
+        base += extraEdgePoints
         return base.distinct()
     }
 

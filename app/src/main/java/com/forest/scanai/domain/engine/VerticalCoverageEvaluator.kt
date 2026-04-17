@@ -8,8 +8,8 @@ import kotlin.math.sqrt
 class VerticalCoverageEvaluator(
     private val minPointsForEvaluation: Int = 180,
     private val middleDominanceThreshold: Float = 0.70f,
-    private val bandWeakThreshold: Float = 0.11f,
-    private val minimumTopCoverageScore: Float = 0.52f
+    private val bandWeakThreshold: Float = 0.09f,
+    private val minimumTopCoverageScore: Float = 0.46f
 ) {
 
     fun evaluate(
@@ -128,16 +128,16 @@ class VerticalCoverageEvaluator(
 
         if (lowerRatio <= bandWeakThreshold) {
             penalties += VerticalCoveragePenalty.MISSING_LOWER_BAND
-            score -= 0.16f
+            score -= 0.12f
         }
 
         if (upperRatio <= bandWeakThreshold) {
             penalties += VerticalCoveragePenalty.MISSING_UPPER_BAND
-            score -= 0.18f
+            score -= 0.14f
         }
         if (topMetrics.score < minimumTopCoverageScore) {
             penalties += VerticalCoveragePenalty.TOP_SURFACE_SPARSE
-            score -= 0.12f
+            score -= 0.08f
         }
 
         if (middleRatio >= middleDominanceThreshold) {
@@ -147,17 +147,17 @@ class VerticalCoverageEvaluator(
 
         if (heightRange < 0.40f) {
             penalties += VerticalCoveragePenalty.INSUFFICIENT_VERTICAL_SPREAD
-            score -= 0.12f
+            score -= 0.08f
         }
 
         if (observerPath.size >= 4 && observerHeightRange < 0.20f) {
             penalties += VerticalCoveragePenalty.SINGLE_HEIGHT_BAND_OBSERVER
-            score -= 0.08f
+            score -= 0.05f
         }
 
         if (observerPath.size >= 4 && observerDistanceVariation < 0.05f) {
             penalties += VerticalCoveragePenalty.CONSTANT_DISTANCE_OBSERVER
-            score -= 0.06f
+            score -= 0.04f
         }
 
         if (lowerRatio in (bandWeakThreshold + 0.001f)..0.18f) {

@@ -7,6 +7,7 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class VolumeCalculator(
     private val params: ScanParams,
@@ -74,15 +75,17 @@ class VolumeCalculator(
         }
 
         val usefulSliceRatio = usefulSlices / numSlices.toDouble()
+        val edgeSliceSupport = computeEdgeSliceSupport(stabilizedSliceAreas)
         val edgeRecoveryFactor = when {
-            usefulSliceRatio < 0.40 -> 1.20
-            usefulSliceRatio < 0.60 -> 1.12
-            usefulSliceRatio < 0.75 -> 1.06
-            else -> 1.0
+            usefulSliceRatio < 0.40 -> 1.28
+            usefulSliceRatio < 0.60 -> 1.18
+            usefulSliceRatio < 0.75 -> 1.10
+            edgeSliceSupport < 0.45 -> 1.08
+            else -> 1.03
         }
         val correctedVolume = rawVolume * edgeRecoveryFactor
 
-        val alpha = if (abs(correctedVolume - lastCalculatedVolume) < correctedVolume * 0.08) 0.07 else 0.04
+        val alpha = if (abs(correctedVolume - lastCalculatedVolume) < correctedVolume * 0.08) 0.28 else 0.18
         val smoothedStereoVolume = if (lastCalculatedVolume == 0.0) {
             correctedVolume
         } else {
@@ -104,6 +107,7 @@ class VolumeCalculator(
                 "volume_slices_total" to numSlices.toString(),
                 "volume_slices_useful" to usefulSlices.toString(),
                 "volume_slice_ratio" to String.format("%.3f", usefulSliceRatio),
+                "volume_edge_slice_support" to String.format("%.3f", edgeSliceSupport),
                 "volume_edge_recovery_factor" to String.format("%.3f", edgeRecoveryFactor),
                 "volume_temporal_alpha" to String.format("%.3f", alpha),
                 "volume_geometric_raw" to String.format("%.3f", rawVolume),
@@ -125,9 +129,9 @@ class VolumeCalculator(
         }
 
         val ys = pointsInSlice.map { it.source.y }.sorted()
-        val sliceGround = percentile(ys, 0.12f)
-        val pileBase = percentile(ys, 0.24f)
-        val crestY = percentile(ys, 0.94f)
+        val sliceGround = percentile(ys, 0.08f)
+        val pileBase = percentile(ys, 0.18f)
+        val crestY = percentile(ys, 0.96f)
 
         val rawHeight = (crestY - sliceGround).toDouble()
         if (rawHeight <= params.groundMargin) {
@@ -139,7 +143,7 @@ class VolumeCalculator(
             )
         }
 
-        val pileCandidatePoints = pointsInSlice.filter { it.source.y >= pileBase + 0.03f }
+        val pileCandidatePoints = pointsInSlice.filter { it.source.y >= pileBase + 0.015f }
         if (pileCandidatePoints.size < 12) {
             return SliceMetrics(
                 area = 0.0,
@@ -153,8 +157,8 @@ class VolumeCalculator(
         val refinedCrestY = percentile(pileYs, 0.95f)
 
         val crossValues = pileCandidatePoints.map { it.cross }.sorted()
-        val crossMin = percentile(crossValues, 0.07f)
-        val crossMax = percentile(crossValues, 0.93f)
+        val crossMin = percentile(crossValues, 0.04f)
+        val crossMax = percentile(crossValues, 0.96f)
         val effectiveWidth = (crossMax - crossMin).toDouble().coerceAtLeast(0.0)
 
         if (effectiveWidth <= 0.05) {
@@ -196,8 +200,7 @@ class VolumeCalculator(
         val bins = estimatedBins.coerceIn(5, 12)
         val binWidth = width / bins
 
-        var totalArea = 0.0
-        var contributingBins = 0
+        val binAreas = DoubleArray(bins)
 
         for (binIndex in 0 until bins) {
             val binStart = crossMin + (binIndex * binWidth).toFloat()
@@ -208,21 +211,52 @@ class VolumeCalculator(
 
             val ys = binPoints.map { it.source.y }.sorted()
             val ground = min(fallbackGround, percentile(ys, 0.12f))
-            val top = percentile(ys, 0.91f)
+            val top = percentile(ys, 0.93f)
             val binHeight = (top - ground).toDouble()
 
             if (binHeight > params.groundMargin) {
-                totalArea += binHeight * binWidth
-                contributingBins++
+                binAreas[binIndex] = binHeight * binWidth
             }
         }
 
+        val filledBinAreas = fillSparseBinAreas(binAreas)
+        val contributingBins = filledBinAreas.count { it > 0.0 }
+        val totalArea = filledBinAreas.sum()
+
         if (contributingBins == 0) {
             val fallbackHeight = (fallbackCrest - fallbackGround).toDouble().coerceAtLeast(0.0)
-            return fallbackHeight * width * 0.70
+            return fallbackHeight * width * 0.88
         }
 
         return totalArea
+    }
+
+    private fun fillSparseBinAreas(binAreas: DoubleArray): DoubleArray {
+        if (binAreas.isEmpty()) return binAreas
+        val result = binAreas.copyOf()
+        for (i in result.indices) {
+            if (result[i] > 0.0) continue
+            val left = (i - 1 downTo 0).firstOrNull { result[it] > 0.0 }?.let { result[it] }
+            val right = (i + 1 until result.size).firstOrNull { result[it] > 0.0 }?.let { result[it] }
+            result[i] = when {
+                left != null && right != null -> (left + right) / 2.0
+                left != null -> left * 0.8
+                right != null -> right * 0.8
+                else -> 0.0
+            }
+        }
+        return result
+    }
+
+    private fun computeEdgeSliceSupport(sliceAreas: List<Double>): Double {
+        if (sliceAreas.isEmpty()) return 0.0
+        val positive = sliceAreas.filter { it > 0.0 }
+        if (positive.isEmpty()) return 0.0
+
+        val edgeCount = (sliceAreas.size * 0.2).roundToInt().coerceAtLeast(1)
+        val left = sliceAreas.take(edgeCount).count { it > 0.0 }
+        val right = sliceAreas.takeLast(edgeCount).count { it > 0.0 }
+        return (left + right) / (edgeCount * 2.0)
     }
 
     private fun smoothSliceAreas(sliceAreas: List<Double>): List<Double> {
