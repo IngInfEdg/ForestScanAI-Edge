@@ -32,12 +32,14 @@ class CsvExporter(private val context: Context) {
             val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
             FileWriter(file).use { writer ->
                 writer.append(
-                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,DetectionReasons,DominanceScore,HeightScore,CompactnessScore,ObserverConsistencyScore,GroundSeparationScore,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VolumeGeometricRaw,VolumeGeometricCorrected,VolumeStereoSmoothed,VolumeNetEstimate,VerticalCoverageScore,VerticalWeakBands,VerticalReasons,TopCoverageScore,TopPointCount,TopBandDensity,TopCoverageState,TopCoverageTrend,TopCoverageTemporalStability,TrajectoryQualityScore,VolumeStabilityScore,VolumeIsStable,VolumeVariationRatio,VolumeIqrRatio,VolumeMadRatio,VolumeDriftRatio,RecentUsefulPointsGrowthRatio,RecentVolumeDeltaRatio,ScaleValidationScore,ReferenceExpectedM,ReferenceObservedM,ReferenceRelativeError,ReferenceStatus,ReferenceNotes,ReferenceObservationSource,AutoCompletionCandidate,FallbackReasons\n"
+                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,StereoVolFinal,NetVolFinal,VolumeGeometricBase,VolumeGeometricCorrected,VolumeStereoTemporalSmoothed,StereoObservationFactor,EdgeRecoveryFactor,TemporalAlpha,TemporalBoundedRatio,VolumeNetEstimate,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,DetectionReasons,DominanceScore,HeightScore,CompactnessScore,ObserverConsistencyScore,GroundSeparationScore,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VerticalCoverageScore,VerticalWeakBands,VerticalReasons,TopCoverageScore,TopPointCount,TopBandDensity,TopCoverageState,TopCoverageTrend,TopCoverageTemporalStability,TrajectoryQualityScore,VolumeStabilityScore,VolumeIsStable,VolumeVariationRatio,VolumeIqrRatio,VolumeMadRatio,VolumeDriftRatio,RecentUsefulPointsGrowthRatio,RecentVolumeDeltaRatio,ScaleValidationScore,ReferenceExpectedM,ReferenceObservedM,ReferenceRelativeError,ReferenceStatus,ReferenceNotes,ReferenceObservationSource,AutoCompletionCandidate,FallbackReasons\n"
                 )
 
                 val debug = result?.detectionDebugInfo.orEmpty()
                 val fallbackReasons = result?.pileDetectionReasons?.joinToString(" | ") ?: ""
                 val boundingBox = debug["bounding_box"] ?: ""
+                val stereoVolForExport = result?.volume ?: uiState.stereoVolume
+                val netVolForExport = result?.netVolumeEstimate ?: uiState.netVolume
 
                 writer.append(
                     listOf(
@@ -46,8 +48,18 @@ class CsvExporter(private val context: Context) {
                         lat.toString(),
                         lon.toString(),
                         uiState.distance.toString(),
-                        uiState.stereoVolume.toString(),
-                        uiState.netVolume.toString(),
+                        stereoVolForExport.toString(),
+                        netVolForExport.toString(),
+                        debug["volume_stereo_final"] ?: stereoVolForExport.toString(),
+                        netVolForExport.toString(),
+                        debug["volume_geometric_raw"] ?: "",
+                        debug["volume_geometric_corrected"] ?: "",
+                        debug["volume_stereo_smoothed"] ?: "",
+                        debug["volume_stereo_observation_factor"] ?: "",
+                        debug["volume_edge_recovery_factor"] ?: "",
+                        debug["volume_temporal_alpha"] ?: "",
+                        debug["volume_temporal_bounded_ratio_vs_corrected"] ?: "",
+                        debug["volume_net_estimate"] ?: "",
                         result?.pointsCount?.toString() ?: "",
                         debug["raw_points"] ?: "",
                         debug["accepted_points"] ?: "",
@@ -70,10 +82,6 @@ class CsvExporter(private val context: Context) {
                         debug["max_height"] ?: "",
                         debug["p95_height"] ?: "",
                         debug["mean_height"] ?: "",
-                        debug["volume_geometric_raw"] ?: "",
-                        debug["volume_geometric_corrected"] ?: "",
-                        debug["volume_stereo_smoothed"] ?: "",
-                        debug["volume_net_estimate"] ?: "",
                         debug["vertical_coverage_score"] ?: "",
                         debug["vertical_weak_bands"] ?: "",
                         debug["vertical_reasons"] ?: "",
@@ -123,12 +131,14 @@ class CsvExporter(private val context: Context) {
         return try {
             context.contentResolver.openOutputStream(destinationUri, "wt")?.bufferedWriter()?.use { writer ->
                 writer.append(
-                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,DetectionReasons,DominanceScore,HeightScore,CompactnessScore,ObserverConsistencyScore,GroundSeparationScore,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VolumeGeometricRaw,VolumeGeometricCorrected,VolumeStereoSmoothed,VolumeNetEstimate,VerticalCoverageScore,VerticalWeakBands,VerticalReasons,TopCoverageScore,TopPointCount,TopBandDensity,TopCoverageState,TopCoverageTrend,TopCoverageTemporalStability,TrajectoryQualityScore,VolumeStabilityScore,VolumeIsStable,VolumeVariationRatio,VolumeIqrRatio,VolumeMadRatio,VolumeDriftRatio,RecentUsefulPointsGrowthRatio,RecentVolumeDeltaRatio,ScaleValidationScore,ReferenceExpectedM,ReferenceObservedM,ReferenceRelativeError,ReferenceStatus,ReferenceNotes,ReferenceObservationSource,AutoCompletionCandidate,FallbackReasons\n"
+                    "Timestamp,AppVersion,Lat,Lon,Distance,StereoVol,NetVol,StereoVolFinal,NetVolFinal,VolumeGeometricBase,VolumeGeometricCorrected,VolumeStereoTemporalSmoothed,StereoObservationFactor,EdgeRecoveryFactor,TemporalAlpha,TemporalBoundedRatio,VolumeNetEstimate,TotalPoints,RawPoints,AcceptedPoints,GroundPoints,NonGroundPoints,PilePoints,Clusters,SelectedCluster,DetectionQuality,DetectionConfidence,DetectionReasons,DominanceScore,HeightScore,CompactnessScore,ObserverConsistencyScore,GroundSeparationScore,EstimatedHeight,BoundingBox,BoundingBoxFinal,MaxHeight,P95Height,MeanHeight,VerticalCoverageScore,VerticalWeakBands,VerticalReasons,TopCoverageScore,TopPointCount,TopBandDensity,TopCoverageState,TopCoverageTrend,TopCoverageTemporalStability,TrajectoryQualityScore,VolumeStabilityScore,VolumeIsStable,VolumeVariationRatio,VolumeIqrRatio,VolumeMadRatio,VolumeDriftRatio,RecentUsefulPointsGrowthRatio,RecentVolumeDeltaRatio,ScaleValidationScore,ReferenceExpectedM,ReferenceObservedM,ReferenceRelativeError,ReferenceStatus,ReferenceNotes,ReferenceObservationSource,AutoCompletionCandidate,FallbackReasons\n"
                 )
 
                 val debug = result?.detectionDebugInfo.orEmpty()
                 val fallbackReasons = result?.pileDetectionReasons?.joinToString(" | ") ?: ""
                 val boundingBox = debug["bounding_box"] ?: ""
+                val stereoVolForExport = result?.volume ?: uiState.stereoVolume
+                val netVolForExport = result?.netVolumeEstimate ?: uiState.netVolume
 
                 writer.append(
                     listOf(
@@ -137,8 +147,18 @@ class CsvExporter(private val context: Context) {
                         lat.toString(),
                         lon.toString(),
                         uiState.distance.toString(),
-                        uiState.stereoVolume.toString(),
-                        uiState.netVolume.toString(),
+                        stereoVolForExport.toString(),
+                        netVolForExport.toString(),
+                        debug["volume_stereo_final"] ?: stereoVolForExport.toString(),
+                        netVolForExport.toString(),
+                        debug["volume_geometric_raw"] ?: "",
+                        debug["volume_geometric_corrected"] ?: "",
+                        debug["volume_stereo_smoothed"] ?: "",
+                        debug["volume_stereo_observation_factor"] ?: "",
+                        debug["volume_edge_recovery_factor"] ?: "",
+                        debug["volume_temporal_alpha"] ?: "",
+                        debug["volume_temporal_bounded_ratio_vs_corrected"] ?: "",
+                        debug["volume_net_estimate"] ?: "",
                         result?.pointsCount?.toString() ?: "",
                         debug["raw_points"] ?: "",
                         debug["accepted_points"] ?: "",
@@ -161,10 +181,6 @@ class CsvExporter(private val context: Context) {
                         debug["max_height"] ?: "",
                         debug["p95_height"] ?: "",
                         debug["mean_height"] ?: "",
-                        debug["volume_geometric_raw"] ?: "",
-                        debug["volume_geometric_corrected"] ?: "",
-                        debug["volume_stereo_smoothed"] ?: "",
-                        debug["volume_net_estimate"] ?: "",
                         debug["vertical_coverage_score"] ?: "",
                         debug["vertical_weak_bands"] ?: "",
                         debug["vertical_reasons"] ?: "",

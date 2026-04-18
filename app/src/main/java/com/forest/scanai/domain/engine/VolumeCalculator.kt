@@ -15,6 +15,8 @@ class VolumeCalculator(
 ) {
 
     private var lastCalculatedVolume = 0.0
+    private val maxTemporalOvershootRatio = 1.08
+    private val minTemporalUndershootRatio = 0.85
 
     private data class ProjectedPoint(
         val source: Position,
@@ -77,30 +79,50 @@ class VolumeCalculator(
         val usefulSliceRatio = usefulSlices / numSlices.toDouble()
         val edgeSliceSupport = computeEdgeSliceSupport(stabilizedSliceAreas)
         val edgeRecoveryFactor = when {
-            usefulSliceRatio < 0.40 -> 1.28
-            usefulSliceRatio < 0.60 -> 1.18
-            usefulSliceRatio < 0.75 -> 1.10
-            edgeSliceSupport < 0.45 -> 1.08
-            else -> 1.03
+            usefulSliceRatio < 0.40 -> 1.24
+            usefulSliceRatio < 0.60 -> 1.16
+            usefulSliceRatio < 0.75 -> 1.08
+            edgeSliceSupport < 0.45 -> 1.06
+            else -> 1.02
         }
         val correctedVolume = rawVolume * edgeRecoveryFactor
 
-        val alpha = if (abs(correctedVolume - lastCalculatedVolume) < correctedVolume * 0.08) 0.28 else 0.18
-        val smoothedStereoVolume = if (lastCalculatedVolume == 0.0) {
+        val isDropping = correctedVolume < lastCalculatedVolume
+        val alpha = when {
+            lastCalculatedVolume == 0.0 -> 1.0
+            isDropping -> 0.52
+            abs(correctedVolume - lastCalculatedVolume) < correctedVolume * 0.08 -> 0.26
+            else -> 0.20
+        }
+
+        val temporallySmoothedVolume = if (lastCalculatedVolume == 0.0) {
             correctedVolume
         } else {
             lastCalculatedVolume + alpha * (correctedVolume - lastCalculatedVolume)
         }
-        val netVolumeEstimate = smoothedStereoVolume * 0.45
 
-        lastCalculatedVolume = smoothedStereoVolume
+        val boundedSmoothedVolume = temporallySmoothedVolume
+            .coerceAtMost(correctedVolume * maxTemporalOvershootRatio)
+            .coerceAtLeast(correctedVolume * minTemporalUndershootRatio)
+
+        val stereoObservationFactor = when {
+            usefulSliceRatio < 0.45 || edgeSliceSupport < 0.30 -> 0.94
+            usefulSliceRatio < 0.60 || edgeSliceSupport < 0.45 -> 0.96
+            usefulSliceRatio < 0.75 -> 0.98
+            else -> 1.0
+        }
+
+        val finalStereoVolume = boundedSmoothedVolume * stereoObservationFactor
+        val netVolumeEstimate = finalStereoVolume * 0.45
+
+        lastCalculatedVolume = boundedSmoothedVolume
 
         return ScanResult(
-            volume = smoothedStereoVolume.coerceAtLeast(0.0),
+            volume = finalStereoVolume.coerceAtLeast(0.0),
             topPoints = smoothedTopPoints,
             geometricVolumeRaw = rawVolume.coerceAtLeast(0.0),
             geometricVolumeCorrected = correctedVolume.coerceAtLeast(0.0),
-            stereoVolumeSmoothed = smoothedStereoVolume.coerceAtLeast(0.0),
+            stereoVolumeSmoothed = boundedSmoothedVolume.coerceAtLeast(0.0),
             netVolumeEstimate = netVolumeEstimate.coerceAtLeast(0.0),
             debugInfo = mapOf(
                 "volume_input_points" to points.size.toString(),
@@ -110,9 +132,16 @@ class VolumeCalculator(
                 "volume_edge_slice_support" to String.format("%.3f", edgeSliceSupport),
                 "volume_edge_recovery_factor" to String.format("%.3f", edgeRecoveryFactor),
                 "volume_temporal_alpha" to String.format("%.3f", alpha),
+                "volume_temporal_overshoot_cap_ratio" to String.format("%.3f", maxTemporalOvershootRatio),
+                "volume_temporal_bounded_ratio_vs_corrected" to String.format(
+                    "%.3f",
+                    if (correctedVolume > 0.0) boundedSmoothedVolume / correctedVolume else 1.0
+                ),
+                "volume_stereo_observation_factor" to String.format("%.3f", stereoObservationFactor),
                 "volume_geometric_raw" to String.format("%.3f", rawVolume),
                 "volume_geometric_corrected" to String.format("%.3f", correctedVolume),
-                "volume_stereo_smoothed" to String.format("%.3f", smoothedStereoVolume),
+                "volume_stereo_smoothed" to String.format("%.3f", boundedSmoothedVolume),
+                "volume_stereo_final" to String.format("%.3f", finalStereoVolume),
                 "volume_net_estimate" to String.format("%.3f", netVolumeEstimate)
             )
         )

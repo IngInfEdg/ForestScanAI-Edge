@@ -490,7 +490,7 @@ class ScanViewModel(
 
         _uiState.update {
             it.copy(
-                stereoVolume = calcResult.stereoVolumeSmoothed,
+                stereoVolume = calcResult.volume,
                 netVolume = calcResult.netVolumeEstimate,
                 distance = if (it.distance == 0.0) rawDist else it.distance + params.emaAlpha * (rawDist - it.distance),
                 topPoints = calcResult.topPoints
