@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.forest.scanai.edge.core.projectPointToScreen
 import com.forest.scanai.edge.domain.model.ScanSessionResult
-import com.forest.scanai.edge.domain.model.ScanUiState
+import com.forest.scanai.edge.presentation.state.ScanUiState
 import androidx.compose.ui.text.font.FontWeight
 import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.presentation.components.MeasurementCompactCard
@@ -50,6 +50,7 @@ fun ScanScreen(
     onRequestSaveCsv: (ScanUiState, ScanSessionResult?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val metrics = uiState.metrics
     val finalResult by viewModel.finalResult.collectAsState()
     val points = viewModel.points
     val visualPoints = remember(points.size) {
@@ -90,7 +91,7 @@ fun ScanScreen(
         )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (uiState.trackingState == TrackingState.TRACKING && finalResult == null) {
+            if (metrics.trackingState == TrackingState.TRACKING && finalResult == null) {
                 visualPoints.forEach { pos ->
                     projectPointToScreen(
                         pos,
@@ -135,7 +136,7 @@ fun ScanScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = uiState.appVersionDisplay,
+                text = metrics.appVersionDisplay,
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -182,7 +183,7 @@ fun ScanScreen(
 
                         Button(
                             onClick = { onRequestSaveCsv(uiState, finalResult) },
-                            enabled = uiState.stereoVolume > 0,
+                            enabled = metrics.stereoVolume > 0,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                         ) {
                             Text("Guardar CSV")

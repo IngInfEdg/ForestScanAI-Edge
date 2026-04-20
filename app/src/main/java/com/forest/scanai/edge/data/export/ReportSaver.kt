@@ -3,8 +3,8 @@ package com.forest.scanai.edge.data.export
 import android.net.Uri
 import com.forest.scanai.edge.core.AppVersionProvider
 import com.forest.scanai.edge.data.location.LocationProvider
+import com.forest.scanai.edge.domain.model.ScanMetrics
 import com.forest.scanai.edge.domain.model.ScanSessionResult
-import com.forest.scanai.edge.domain.model.ScanUiState
 
 class ReportSaver(
     private val locationProvider: LocationProvider,
@@ -13,13 +13,13 @@ class ReportSaver(
 ) {
     suspend fun saveReport(
         destinationUri: Uri,
-        uiState: ScanUiState,
+        metrics: ScanMetrics,
         result: ScanSessionResult?
     ): Boolean {
         val location = locationProvider.getCurrentLocation()
         return csvExporter.saveReportToUri(
             destinationUri = destinationUri,
-            uiState = uiState,
+            metrics = metrics,
             result = result,
             appVersionDisplay = appVersionProvider.displayVersion,
             lat = location?.latitude ?: 0.0,

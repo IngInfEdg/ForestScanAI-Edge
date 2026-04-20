@@ -11,6 +11,7 @@ import com.forest.scanai.edge.data.export.CsvExporter
 import com.forest.scanai.edge.data.export.ReportSaver
 import com.forest.scanai.edge.data.location.LocationProvider
 import com.forest.scanai.edge.presentation.screen.MainRoute
+import com.forest.scanai.edge.presentation.state.ScanUiState
 import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.presentation.viewmodel.ScanViewModelFactory
 import com.forest.scanai.edge.ui.theme.ForestScanAITheme
@@ -42,9 +43,9 @@ class MainActivity : ComponentActivity() {
             ForestScanAITheme {
                 MainRoute(
                     viewModel = viewModel,
-                    onSaveReportToUri = { destinationUri, uiState, result ->
+                    onSaveReportToUri = { destinationUri, uiState: ScanUiState, result ->
                         lifecycleScope.launch {
-                            val saved = reportSaver.saveReport(destinationUri, uiState, result)
+                            val saved = reportSaver.saveReport(destinationUri, uiState.metrics, result)
                             val message = if (saved) "Reporte guardado" else "No se pudo guardar el CSV"
                             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
                         }

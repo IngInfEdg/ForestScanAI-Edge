@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.forest.scanai.edge.domain.model.CompletenessLevel
-import com.forest.scanai.edge.domain.model.ScanUiState
+import com.forest.scanai.edge.presentation.state.ScanUiState
 import com.google.ar.core.TrackingState
 import java.util.Locale
 
@@ -31,7 +31,8 @@ fun MeasurementCompactCard(
     modifier: Modifier = Modifier
 ) {
     var showDiagnostics by remember { mutableStateOf(false) }
-    val stateColor = when (uiState.completeness) {
+    val metrics = uiState.metrics
+    val stateColor = when (metrics.completeness) {
         CompletenessLevel.COMPLETE -> Color(0xFF4CAF50)
         CompletenessLevel.ACCEPTABLE -> Color(0xFFFFC107)
         CompletenessLevel.PARTIAL -> Color(0xFFFF9800)
@@ -55,7 +56,7 @@ fun MeasurementCompactCard(
             fontWeight = FontWeight.Bold
         )
 
-        if (uiState.trackingState != TrackingState.TRACKING) {
+        if (metrics.trackingState != TrackingState.TRACKING) {
             Text(
                 text = "AR: moviendo cámara, buscando superficie...",
                 color = Color.Yellow,
@@ -70,24 +71,24 @@ fun MeasurementCompactCard(
         ) {
             MetricItem(
                 label = "m³ Estéreo",
-                value = formatVolume(uiState.stereoVolume)
+                value = formatVolume(metrics.stereoVolume)
             )
 
             MetricItem(
                 label = "m³ Neto",
-                value = formatVolume(uiState.netVolume)
+                value = formatVolume(metrics.netVolume)
             )
         }
 
         Text(
-            text = "Cobertura: ${formatPercent(uiState.coveragePercentage)}%",
+            text = "Cobertura: ${formatPercent(metrics.coveragePercentage)}%",
             color = Color(0xFF00E5FF),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold
         )
 
         Text(
-            text = "Estado: ${completenessText(uiState.completeness)}",
+            text = "Estado: ${completenessText(metrics.completeness)}",
             color = stateColor,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Bold
@@ -108,7 +109,7 @@ fun MeasurementCompactCard(
         )
 
         if (showDiagnostics) {
-            uiState.diagnostics.forEach { detail ->
+            metrics.diagnostics.forEach { detail ->
                 Text(
                     text = "• $detail",
                     color = Color(0xFFE0E0E0),
