@@ -1,8 +1,8 @@
 package com.forest.scanai.edge
 
 import android.Manifest
-import android.net.Uri
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -18,8 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.forest.scanai.edge.core.AppVersionProvider
 import com.forest.scanai.edge.data.export.CsvExporter
@@ -27,6 +25,7 @@ import com.forest.scanai.edge.data.location.LocationProvider
 import com.forest.scanai.edge.domain.model.ScanSessionResult
 import com.forest.scanai.edge.domain.model.ScanUiState
 import com.forest.scanai.edge.presentation.ScanViewModel
+import com.forest.scanai.edge.presentation.viewmodel.ScanViewModelFactory
 import com.forest.scanai.edge.ui.ScanScreen
 import com.forest.scanai.edge.ui.theme.ForestScanAITheme
 import kotlinx.coroutines.launch
@@ -38,17 +37,12 @@ class MainActivity : ComponentActivity() {
     private val appVersionProvider by lazy { AppVersionProvider(applicationContext) }
 
     private val viewModel: ScanViewModel by viewModels {
-        object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return ScanViewModel(
-                    locationProvider = locationProvider,
-                    appVersionName = appVersionProvider.versionName,
-                    appVersionCode = appVersionProvider.versionCode,
-                    appVersionDisplay = appVersionProvider.displayVersion
-                ) as T
-            }
-        }
+        ScanViewModelFactory(
+            locationProvider = locationProvider,
+            appVersionName = appVersionProvider.versionName,
+            appVersionCode = appVersionProvider.versionCode,
+            appVersionDisplay = appVersionProvider.displayVersion
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
