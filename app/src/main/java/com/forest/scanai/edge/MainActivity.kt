@@ -10,8 +10,8 @@ import com.forest.scanai.edge.core.AppVersionProvider
 import com.forest.scanai.edge.data.export.CsvExporter
 import com.forest.scanai.edge.data.export.ReportSaver
 import com.forest.scanai.edge.data.location.LocationProvider
-import com.forest.scanai.edge.presentation.ScanViewModel
 import com.forest.scanai.edge.presentation.screen.MainRoute
+import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.presentation.viewmodel.ScanViewModelFactory
 import com.forest.scanai.edge.ui.theme.ForestScanAITheme
 import kotlinx.coroutines.launch

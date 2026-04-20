@@ -3,7 +3,6 @@ package com.forest.scanai.edge.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.forest.scanai.edge.data.location.LocationProvider
-import com.forest.scanai.edge.presentation.ScanViewModel
 
 class ScanViewModelFactory(
     private val locationProvider: LocationProvider,

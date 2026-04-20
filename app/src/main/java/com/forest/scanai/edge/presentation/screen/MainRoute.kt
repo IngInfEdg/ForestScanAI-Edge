@@ -26,7 +26,7 @@ import androidx.core.content.ContextCompat
 import com.forest.scanai.edge.data.export.CsvExporter
 import com.forest.scanai.edge.domain.model.ScanSessionResult
 import com.forest.scanai.edge.domain.model.ScanUiState
-import com.forest.scanai.edge.presentation.ScanViewModel
+import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.ui.ScanScreen
 
 @Composable

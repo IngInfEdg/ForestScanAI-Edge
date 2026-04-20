@@ -36,7 +36,7 @@ import com.forest.scanai.edge.core.projectPointToScreen
 import com.forest.scanai.edge.domain.model.ScanSessionResult
 import com.forest.scanai.edge.domain.model.ScanUiState
 import androidx.compose.ui.text.font.FontWeight
-import com.forest.scanai.edge.presentation.ScanViewModel
+import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.presentation.components.MeasurementCompactCard
 import com.forest.scanai.edge.presentation.components.SegmentedPile3DView
 import com.google.ar.core.Config
@@ -370,4 +370,4 @@ private fun ResultOverlay(
 
 private fun formatDouble(value: Double): String {
     return String.format(Locale.US, "%.2f", value)
-}// TODO: Mejora medición AR - ajuste precisión
+}
