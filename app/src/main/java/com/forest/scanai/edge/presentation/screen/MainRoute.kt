@@ -32,7 +32,8 @@ import com.forest.scanai.edge.ui.ScanScreen
 @Composable
 fun MainRoute(
     viewModel: ScanViewModel,
-    onSaveReportToUri: (Uri, ScanUiState, ScanSessionResult?) -> Unit
+    onSaveReportToUri: (Uri, ScanUiState, ScanSessionResult?) -> Unit,
+    onSaveBenchmarkToUri: (Uri, ScanSessionResult) -> Unit
 ) {
     val context = LocalContext.current
     val permissions = arrayOf(
@@ -48,8 +49,11 @@ fun MainRoute(
             }
         )
     }
+    
     val csvExporter = remember(context) { CsvExporter(context) }
     var pendingCsvRequest by remember { mutableStateOf<Pair<ScanUiState, ScanSessionResult?>?>(null) }
+    var pendingBenchmark by remember { mutableStateOf<ScanSessionResult?>(null) }
+    
     val createCsvLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
@@ -58,6 +62,16 @@ fun MainRoute(
             onSaveReportToUri(uri, pending.first, pending.second)
         }
         pendingCsvRequest = null
+    }
+
+    val createBenchmarkLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val pending = pendingBenchmark
+        if (uri != null && pending != null) {
+            onSaveBenchmarkToUri(uri, pending)
+        }
+        pendingBenchmark = null
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -77,6 +91,10 @@ fun MainRoute(
             onRequestSaveCsv = { uiState, result ->
                 pendingCsvRequest = uiState to result
                 createCsvLauncher.launch(csvExporter.buildSuggestedFileName())
+            },
+            onRequestSaveBenchmark = { result ->
+                pendingBenchmark = result
+                createBenchmarkLauncher.launch("Benchmark_${System.currentTimeMillis()}.csv")
             }
         )
     } else {

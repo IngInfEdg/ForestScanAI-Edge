@@ -47,7 +47,8 @@ import java.util.Locale
 @Composable
 fun ScanScreen(
     viewModel: ScanViewModel,
-    onRequestSaveCsv: (ScanUiState, ScanSessionResult?) -> Unit
+    onRequestSaveCsv: (ScanUiState, ScanSessionResult?) -> Unit,
+    onRequestSaveBenchmark: (ScanSessionResult) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val metrics = uiState.metrics
@@ -123,7 +124,8 @@ fun ScanScreen(
                 result = finalResult,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(16.dp)
+                    .padding(16.dp),
+                onRequestSaveBenchmark = onRequestSaveBenchmark
             )
         }
 
@@ -280,7 +282,8 @@ fun ScanScreen(
 @Composable
 private fun ResultOverlay(
     result: ScanSessionResult?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRequestSaveBenchmark: (ScanSessionResult) -> Unit = {}
 ) {
     if (result == null) return
 
@@ -366,6 +369,16 @@ private fun ResultOverlay(
                 .fillMaxWidth()
                 .height(280.dp)
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = { onRequestSaveBenchmark(result) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF673AB7))
+        ) {
+            Text("Registrar Benchmark", color = Color.White)
+        }
     }
 }
 
