@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ForestScanAI"
+rootProject.name = "ForestScanAI Edge"
 include(":app")

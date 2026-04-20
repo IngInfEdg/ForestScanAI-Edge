@@ -5,11 +5,11 @@ plugins {
 }
 android {
 
-    namespace = "com.forest.scanai"
+    namespace = "com.forest.scanai.edge"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.forest.scanai"
+        applicationId = "com.forest.scanai.edge"
         minSdk = 26
         targetSdk = 35
         versionCode = 2
@@ -34,7 +34,7 @@ android {
     buildFeatures {
         compose = true
     }
-    
+
     packaging {
         jniLibs {
             // Requerido para compatibilidad con páginas de 16 KB en Android 15
@@ -55,11 +55,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    
-    // Versiones actualizadas para soporte de 16KB y Android 15
-    implementation("com.google.ar:core:1.53.0") 
-    implementation("io.github.sceneview:arsceneview:0.10.0") // Mantenemos esta versión por compatibilidad de API
-    
+
+    implementation("com.google.ar:core:1.53.0")
+    implementation("io.github.sceneview:arsceneview:0.10.0")
+
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
@@ -70,6 +69,4 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-
-
 }

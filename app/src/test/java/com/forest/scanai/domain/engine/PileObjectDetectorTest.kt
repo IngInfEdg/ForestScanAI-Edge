@@ -1,4 +1,4 @@
-package com.forest.scanai.domain.engine
+package com.forest.scanai.edge.domain.engine
 
 import io.github.sceneview.math.Position
 import org.junit.Assert.assertEquals

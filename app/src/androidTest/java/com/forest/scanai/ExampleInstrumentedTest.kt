@@ -1,4 +1,4 @@
-package com.forest.scanai
+package com.forest.scanai.edge
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4

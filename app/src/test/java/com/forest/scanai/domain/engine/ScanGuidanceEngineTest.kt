@@ -1,6 +1,6 @@
-package com.forest.scanai.domain.engine
+package com.forest.scanai.edge.domain.engine
 
-import com.forest.scanai.domain.model.CompletenessLevel
+import com.forest.scanai.edge.domain.model.CompletenessLevel
 import org.junit.Assert.assertTrue
 import org.junit.Test
 

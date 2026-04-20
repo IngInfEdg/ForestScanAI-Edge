@@ -1,8 +1,8 @@
-package com.forest.scanai.domain.engine
+package com.forest.scanai.edge.domain.engine
 
-import com.forest.scanai.domain.model.ReferenceMeasurementStatus
-import com.forest.scanai.domain.model.ReferenceObject
-import com.forest.scanai.domain.model.ReferenceObjectType
+import com.forest.scanai.edge.domain.model.ReferenceMeasurementStatus
+import com.forest.scanai.edge.domain.model.ReferenceObject
+import com.forest.scanai.edge.domain.model.ReferenceObjectType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

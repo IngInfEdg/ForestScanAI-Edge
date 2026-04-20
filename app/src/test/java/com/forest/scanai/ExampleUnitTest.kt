@@ -1,4 +1,4 @@
-package com.forest.scanai
+package com.forest.scanai.edge
 
 import org.junit.Test
 
