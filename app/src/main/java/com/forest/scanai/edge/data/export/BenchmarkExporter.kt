@@ -21,13 +21,17 @@ class BenchmarkExporter(private val context: Context) {
     fun saveBenchmarkToUri(destinationUri: Uri, record: BenchmarkRecord): Boolean {
         return try {
             context.contentResolver.openOutputStream(destinationUri, "wa")?.bufferedWriter()?.use { writer ->
-                val header = "ID,Timestamp,PileName,Operator,Volume,NetVolume,Distance,Coverage,GPSPoints,Sectors,Completeness,AppVersion,Source,Device,Notes"
+                val header = "ID,Timestamp,SessionLabel,PileName,Operator,ReferenceSource,RefVolume,Volume,NetVolume,Distance,Coverage,GPSPoints,Sectors,Completeness,AppVersion,Device,Notes"
                 
+                val m = record.metadata
                 val row = listOf(
                     record.id,
                     SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(record.timestamp)),
-                    record.pileName,
-                    record.operatorName ?: "",
+                    m.sessionLabel,
+                    m.pileName,
+                    m.operatorName,
+                    m.referenceSource,
+                    m.referenceVolume?.toString() ?: "",
                     record.volume.toString(),
                     record.netVolume.toString(),
                     record.distance.toString(),
@@ -36,9 +40,8 @@ class BenchmarkExporter(private val context: Context) {
                     "${record.coveredSectors}/${record.totalSectors}",
                     record.completeness,
                     record.appVersionDisplay,
-                    record.source,
                     record.deviceModel,
-                    record.notes ?: ""
+                    m.notes
                 ).joinToString(",") { "\"$it\"" }
 
                 writer.write(header)

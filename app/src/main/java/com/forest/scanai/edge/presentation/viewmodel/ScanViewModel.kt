@@ -75,6 +75,25 @@ class ScanViewModel(
         manualReferenceObservedLengthMeters = observedLengthMeters?.takeIf { it > 0.0 }
     }
 
+    private fun computeRecentUsefulPointGrowthRatio(window: Int = 6): Float {
+        val recent = usefulPointHistory.takeLast(window)
+        if (recent.size < 2) return 1f
+        val first = recent.first().coerceAtLeast(1)
+        val last = recent.last()
+        return ((last - first).toFloat() / first.toFloat()).coerceAtLeast(0f)
+    }
+
+    private fun computeRecentVolumeDeltaRatio(window: Int = 6): Float {
+        val recent = volumeHistory.takeLast(window)
+        if (recent.size < 2) return 1f
+        val median = recent.sorted().let { sorted ->
+            if (sorted.size % 2 == 0) (sorted[sorted.size / 2] + sorted[sorted.size / 2 - 1]) / 2.0
+            else sorted[sorted.size / 2]
+        }.coerceAtLeast(1e-6)
+        val delta = ((recent.maxOrNull() ?: median) - (recent.minOrNull() ?: median)).coerceAtLeast(0.0)
+        return (delta / median).toFloat().coerceAtLeast(0f)
+    }
+
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
     }
@@ -84,11 +103,8 @@ class ScanViewModel(
         _uiState.update { it.copy(isMeasuring = true, error = null) }
         gpsJob = viewModelScope.launch {
             locationProvider.locationUpdates().collectLatest { loc ->
-                if (trajectory.isEmpty()) {
+                if (trajectory.isEmpty() || loc.distanceTo(trajectory.last()) > 1.5f) {
                     trajectory.add(loc)
-                } else {
-                    val last = trajectory.last()
-                    if (loc.distanceTo(last) > 1.5f && loc.accuracy <= 25f) trajectory.add(loc)
                 }
                 refreshMeasurementState(force = true)
             }
@@ -98,15 +114,94 @@ class ScanViewModel(
     private fun stopMeasurement() {
         gpsJob?.cancel()
         val currentPoints = points.toList()
-        
-        // Simulación de stop para estabilizar compilación
+
+        // 1. Detección y Segmentación final
+        val detection = pileObjectDetector.detect(currentPoints, observerPath.toList())
+        val primaryPilePoints = if (detection.pilePoints.size >= 120) detection.pilePoints else currentPoints
+
+        val segmented = segmenter.segment(primaryPilePoints)
+        val refinedPilePoints = segmented?.pilePoints?.takeIf { it.isNotEmpty() } ?: primaryPilePoints
+        val refinedGroundPoints = segmented?.groundPoints ?: detection.groundPoints
+
+        // 2. Evaluaciones de Calidad
+        val coverageResult = coverageEvaluator.evaluateFromObserverPath(observerPath.toList(), refinedPilePoints)
+        val verticalCoverage = verticalCoverageEvaluator.evaluate(refinedPilePoints, observerPath.toList(), topCoverageHistory.toList())
+        val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
+        val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
+
+        val gpsDistance = calculateGpsDistance()
+        val arDistance = calculateArDistance()
+
+        // 3. Validación de completitud y estado
+        val completeness = completenessValidator.validate(
+            coverageResult.coverageRatio, coverageResult.coveredSectors, observerPath.size,
+            refinedPilePoints.size, arDistance, gpsDistance
+        )
+
+        val stateDecision = stateEvaluator.evaluate(
+            MeasurementStateInput(
+                baseCompleteness = completeness,
+                coverageRatio = coverageResult.coverageRatio,
+                coveredSectors = coverageResult.coveredSectors,
+                observerSamples = observerPath.size,
+                usefulPointCount = refinedPilePoints.size,
+                trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
+                hasTrajectoryInstability = TrajectoryPenalty.LOW_KINEMATIC_CONSISTENCY in trajectoryQuality.penaltyFlags,
+                verticalCoverageScore = verticalCoverage.verticalCoverageScore,
+                weakVerticalBands = verticalCoverage.weakBands.size,
+                missingLowerBand = VerticalCoveragePenalty.MISSING_LOWER_BAND in verticalCoverage.penaltyFlags,
+                missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
+                supportsAcceptableVertical = verticalCoverage.supportsAcceptable,
+                hasStrongMiddleConcentration = verticalCoverage.hasStrongMiddleConcentration,
+                isVolumeStable = volumeStability.isStable,
+                topCoverageScore = verticalCoverage.topCoverageScore,
+                topCoverageState = verticalCoverage.topCoverageState,
+                recentUsefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
+                recentVolumeDeltaRatio = computeRecentVolumeDeltaRatio(),
+                hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
+                hasReviewableModel = refinedPilePoints.size >= 600
+            )
+        )
+
+        // 4. Cálculo final de volumen
+        val result = calculator.calculate(refinedPilePoints)
+        val reviewModel = segmented?.let { reviewBuilder.build(it) }
+
+        // 5. Construir Resultado Final
+        _finalResult.value = ScanSessionResult(
+            volume = result.volume,
+            length = detection.boundingBox?.length?.toDouble() ?: 0.0,
+            maxHeight = segmented?.heightSummary?.maxHeight ?: 0.0,
+            maxWidth = detection.boundingBox?.width?.toDouble() ?: 0.0,
+            points = currentPoints,
+            topPoints = result.topPoints,
+            trajectory = trajectory.toList(),
+            observerPath = observerPath.toList(),
+            coverage = coverageResult.coverageRatio,
+            completeness = stateDecision.completeness,
+            confidence = detection.detectionConfidence,
+            pointsCount = currentPoints.size,
+            arDistanceWalked = arDistance,
+            gpsDistanceWalked = gpsDistance,
+            gpsPointCount = trajectory.size,
+            coveredSectors = coverageResult.coveredSectors,
+            totalSectors = coverageResult.totalSectors,
+            missingSectors = coverageResult.missingSectors,
+            guidanceSummary = stateDecision.shortGuidance,
+            groundPoints = refinedGroundPoints,
+            pileOnlyPoints = refinedPilePoints,
+            reviewModelPoints = reviewModel?.points ?: emptyList(),
+            appVersionDisplay = appVersionDisplay
+        )
+
         _uiState.update {
             it.copy(
                 isMeasuring = false,
+                canReviewMeasurement = true,
+                canFinishMeasurement = stateDecision.canFinish,
                 metrics = it.metrics.copy(
-                    coveragePercentage = 0.5f,
-                    gpsDistanceWalked = calculateGpsDistance(),
-                    arDistanceWalked = calculateArDistance()
+                    completeness = stateDecision.completeness,
+                    coveragePercentage = coverageResult.coverageRatio
                 )
             )
         }
@@ -125,52 +220,95 @@ class ScanViewModel(
         }
 
         val newPoints = processor.extractFilteredPoints(frame, currentPos, voxelGrid)
-        if (newPoints.isNotEmpty()) points.addAll(newPoints)
+        if (newPoints.isNotEmpty()) {
+            points.addAll(newPoints)
 
-        val rawDist = sqrt(
-            (currentPos.x - startPos!!.x).toDouble().pow(2.0) +
-                (currentPos.z - startPos!!.z).toDouble().pow(2.0)
-        )
+            // Cálculo de volumen en tiempo real
+            frameCounter++
+            if (frameCounter % 5 == 0) {
+                val calcResult = calculator.calculate(points.toList())
+                _uiState.update {
+                    it.copy(
+                        metrics = it.metrics.copy(
+                            stereoVolume = calcResult.volume,
+                            netVolume = calcResult.netVolumeEstimate,
+                            topPoints = calcResult.topPoints
+                        )
+                    )
+                }
 
+                volumeHistory.addLast(calcResult.volume)
+                if (volumeHistory.size > 20) volumeHistory.removeFirst()
+                usefulPointHistory.addLast(points.size)
+                if (usefulPointHistory.size > 20) usefulPointHistory.removeFirst()
+            }
+        }
+
+        val rawDist = sqrt((currentPos.x - startPos!!.x).toDouble().pow(2.0) + (currentPos.z - startPos!!.z).toDouble().pow(2.0))
         _uiState.update {
-            it.copy(
-                metrics = it.metrics.copy(
-                    distance = if (it.metrics.distance == 0.0) rawDist else it.metrics.distance + 0.1 * (rawDist - it.metrics.distance)
-                )
-            )
+            it.copy(metrics = it.metrics.copy(distance = rawDist))
         }
         refreshMeasurementState()
     }
 
     private fun refreshMeasurementState(force: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastStateRefreshAtMs < 250L) return
+        if (!force && now - lastStateRefreshAtMs < 500L) return
         lastStateRefreshAtMs = now
-    }
 
-    private fun calculateGpsDistance(): Double {
-        if (trajectory.size < 2) return 0.0
-        return trajectory.zipWithNext { a, b -> a.distanceTo(b).toDouble() }.sum()
-    }
+        val currentPoints = points.toList()
+        val coverageResult = coverageEvaluator.evaluateFromObserverPath(observerPath.toList(), currentPoints)
+        val verticalCoverage = verticalCoverageEvaluator.evaluate(currentPoints, observerPath.toList(), topCoverageHistory.toList())
+        topCoverageHistory.addLast(verticalCoverage.topCoverageScore)
+        if (topCoverageHistory.size > 24) topCoverageHistory.removeFirst()
 
-    private fun calculateArDistance(): Double {
-        if (observerPath.size < 2) return 0.0
-        return observerPath.zipWithNext { a, b -> distanceBetween(a, b) }.sum()
-    }
+        val arDistance = calculateArDistance()
+        val gpsDistance = calculateGpsDistance()
 
-    private fun distanceBetween(a: Position, b: Position): Double {
-        return sqrt(
-            (a.x - b.x).toDouble().pow(2.0) +
-                (a.z - b.z).toDouble().pow(2.0)
+        val completeness = completenessValidator.validate(
+            coverageResult.coverageRatio, coverageResult.coveredSectors, observerPath.size,
+            currentPoints.size, arDistance, gpsDistance
         )
+
+        val guidance = guidanceEngine.buildMessage(
+            completeness = completeness,
+            missingSectors = coverageResult.missingSectors,
+            observerSamples = observerPath.size,
+            usefulPoints = currentPoints.size,
+            missingUpperBand = VerticalCoveragePenalty.MISSING_UPPER_BAND in verticalCoverage.penaltyFlags,
+            lowTopCoverage = verticalCoverage.topCoverageScore < 0.55f,
+            topCoverageState = verticalCoverage.topCoverageState,
+            autoCompletionCandidate = false
+        )
+
+        _uiState.update {
+            it.copy(
+                guidanceMessage = guidance,
+                metrics = it.metrics.copy(
+                    coveragePercentage = coverageResult.coverageRatio,
+                    coveredSectors = coverageResult.coveredSectors,
+                    completeness = completeness,
+                    arDistanceWalked = arDistance,
+                    gpsDistanceWalked = gpsDistance
+                )
+            )
+        }
     }
+
+    private fun calculateGpsDistance(): Double = trajectory.zipWithNext { a, b -> a.distanceTo(b).toDouble() }.sum()
+    private fun calculateArDistance(): Double = observerPath.zipWithNext { a, b -> distanceBetween(a, b) }.sum()
+    private fun distanceBetween(a: Position, b: Position): Double = sqrt((a.x - b.x).toDouble().pow(2.0) + (a.z - b.z).toDouble().pow(2.0))
 
     fun reset() {
         points.clear()
         voxelGrid.clear()
         trajectory.clear()
         observerPath.clear()
+        volumeHistory.clear()
+        usefulPointHistory.clear()
+        topCoverageHistory.clear()
         _uiState.update { ScanUiState(metrics = ScanMetrics(appVersionDisplay = appVersionDisplay)) }
+        _finalResult.value = null
         gpsJob?.cancel()
         startPos = null
     }

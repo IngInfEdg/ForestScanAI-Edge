@@ -24,7 +24,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.forest.scanai.edge.data.export.CsvExporter
+import com.forest.scanai.edge.domain.model.BenchmarkMetadata
 import com.forest.scanai.edge.domain.model.ScanSessionResult
+import com.forest.scanai.edge.presentation.components.BenchmarkMetadataDialog
 import com.forest.scanai.edge.presentation.state.ScanUiState
 import com.forest.scanai.edge.presentation.viewmodel.ScanViewModel
 import com.forest.scanai.edge.ui.ScanScreen
@@ -33,7 +35,7 @@ import com.forest.scanai.edge.ui.ScanScreen
 fun MainRoute(
     viewModel: ScanViewModel,
     onSaveReportToUri: (Uri, ScanUiState, ScanSessionResult?) -> Unit,
-    onSaveBenchmarkToUri: (Uri, ScanSessionResult) -> Unit
+    onSaveBenchmarkToUri: (Uri, ScanSessionResult, BenchmarkMetadata) -> Unit
 ) {
     val context = LocalContext.current
     val permissions = arrayOf(
@@ -53,6 +55,8 @@ fun MainRoute(
     val csvExporter = remember(context) { CsvExporter(context) }
     var pendingCsvRequest by remember { mutableStateOf<Pair<ScanUiState, ScanSessionResult?>?>(null) }
     var pendingBenchmark by remember { mutableStateOf<ScanSessionResult?>(null) }
+    var pendingMetadata by remember { mutableStateOf<BenchmarkMetadata?>(null) }
+    var showMetadataDialog by remember { mutableStateOf(false) }
     
     val createCsvLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
@@ -67,11 +71,13 @@ fun MainRoute(
     val createBenchmarkLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
-        val pending = pendingBenchmark
-        if (uri != null && pending != null) {
-            onSaveBenchmarkToUri(uri, pending)
+        val pendingRes = pendingBenchmark
+        val pendingMeta = pendingMetadata
+        if (uri != null && pendingRes != null && pendingMeta != null) {
+            onSaveBenchmarkToUri(uri, pendingRes, pendingMeta)
         }
         pendingBenchmark = null
+        pendingMetadata = null
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -85,6 +91,20 @@ fun MainRoute(
         }
     }
 
+    if (showMetadataDialog && pendingBenchmark != null) {
+        BenchmarkMetadataDialog(
+            onDismiss = { 
+                showMetadataDialog = false
+                pendingBenchmark = null 
+            },
+            onConfirm = { metadata ->
+                pendingMetadata = metadata
+                showMetadataDialog = false
+                createBenchmarkLauncher.launch("Benchmark_${metadata.pileName}_${System.currentTimeMillis()}.csv")
+            }
+        )
+    }
+
     if (permissionsGranted) {
         ScanScreen(
             viewModel = viewModel,
@@ -94,7 +114,7 @@ fun MainRoute(
             },
             onRequestSaveBenchmark = { result ->
                 pendingBenchmark = result
-                createBenchmarkLauncher.launch("Benchmark_${System.currentTimeMillis()}.csv")
+                showMetadataDialog = true
             }
         )
     } else {

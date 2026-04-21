@@ -53,8 +53,8 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
                         }
                     },
-                    onSaveBenchmarkToUri = { uri, result ->
-                        val record = createBenchmarkRecord(result)
+                    onSaveBenchmarkToUri = { uri, result, metadata ->
+                        val record = createBenchmarkRecord(result, metadata)
                         val success = benchmarkExporter.saveBenchmarkToUri(uri, record)
                         Toast.makeText(this@MainActivity, if(success) "Benchmark registrado" else "Error al registrar benchmark", Toast.LENGTH_SHORT).show()
                     }

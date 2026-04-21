@@ -5,9 +5,7 @@ import android.os.Build
 data class BenchmarkRecord(
     val id: String,
     val timestamp: Long,
-    val pileName: String,
-    val operatorName: String? = null,
-    val notes: String? = null,
+    val metadata: BenchmarkMetadata,
     val volume: Double,
     val netVolume: Double,
     val distance: Double,
@@ -27,16 +25,12 @@ data class BenchmarkRecord(
  */
 fun createBenchmarkRecord(
     result: ScanSessionResult,
-    pileName: String = "Pila_${System.currentTimeMillis()}",
-    operator: String? = null,
-    notes: String? = null
+    metadata: BenchmarkMetadata
 ): BenchmarkRecord {
     return BenchmarkRecord(
         id = java.util.UUID.randomUUID().toString(),
         timestamp = System.currentTimeMillis(),
-        pileName = pileName,
-        operatorName = operator,
-        notes = notes,
+        metadata = metadata,
         volume = result.volume,
         netVolume = result.netVolumeEstimate,
         distance = result.arDistanceWalked,
