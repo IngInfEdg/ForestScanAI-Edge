@@ -95,6 +95,8 @@ class ScanViewModel(
     private var lastStateRefreshAtMs = 0L
     private var lastLiveScanResult = com.forest.scanai.edge.domain.model.ScanResult(0.0, emptyList())
     private var frameCounter = 0
+    private var replaySampleIndex = 0
+    private var lastReplayTickAtMs = 0L
     private var configuredReferenceObject: ReferenceObject? = ReferenceObject(
         id = "default_bar_2m",
         type = ReferenceObjectType.BAR_2M,
@@ -462,6 +464,10 @@ class ScanViewModel(
     fun onFrameUpdated(frame: com.google.ar.core.Frame) {
         _uiState.update { it.copy(trackingState = frame.camera.trackingState) }
         if (!_uiState.value.isMeasuring) return
+        val isReplayMode = measurementSourceMode == MeasurementSourceMode.REPLAY
+        val now = SystemClock.elapsedRealtime()
+        if (isReplayMode && now - lastReplayTickAtMs < 150L) return
+        if (isReplayMode) lastReplayTickAtMs = now
 
         val cameraPose = frame.camera.pose
         val currentPos = Position(cameraPose.tx(), cameraPose.ty(), cameraPose.tz())
@@ -471,8 +477,9 @@ class ScanViewModel(
             observerPath.add(currentPos)
         }
 
-        val newPoints = if (measurementSourceMode == MeasurementSourceMode.REPLAY) {
-            generateDeterministicReplayPoints(observerPath.size)
+        val newPoints = if (isReplayMode) {
+            replaySampleIndex += 1
+            generateDeterministicReplayPoints(replaySampleIndex)
         } else {
             processor.extractFilteredPoints(frame, currentPos, voxelGrid)
         }
@@ -489,13 +496,18 @@ class ScanViewModel(
             )
         )
 
-        val liveSegmentedPoints = segmenter.segment(measurementPoints)
-            ?.pilePoints
-            ?.takeIf { it.isNotEmpty() }
-            ?: measurementPoints
+        val liveSegmentedPoints = if (isReplayMode) {
+            measurementPoints
+        } else {
+            segmenter.segment(measurementPoints)
+                ?.pilePoints
+                ?.takeIf { it.isNotEmpty() }
+                ?: measurementPoints
+        }
 
         frameCounter++
-        val calcResult = if (frameCounter % 2 == 0) {
+        val calculationStride = if (isReplayMode) 4 else 2
+        val calcResult = if (frameCounter % calculationStride == 0) {
             calculator.calculate(liveSegmentedPoints).also { lastLiveScanResult = it }
         } else {
             lastLiveScanResult
@@ -547,7 +559,8 @@ class ScanViewModel(
 
     private fun refreshMeasurementState(force: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
-        if (!force && now - lastStateRefreshAtMs < 250L) return
+        val refreshIntervalMs = if (measurementSourceMode == MeasurementSourceMode.REPLAY) 600L else 250L
+        if (!force && now - lastStateRefreshAtMs < refreshIntervalMs) return
         lastStateRefreshAtMs = now
 
         val currentPoints = points.toList()
@@ -662,7 +675,7 @@ class ScanViewModel(
             detection = detection
         )
 
-        if (!detection.isRobust) {
+        if (!detection.isRobust && measurementSourceMode != MeasurementSourceMode.REPLAY) {
             Log.d("PileObjectDetector", "Fallback activo: ${detection.reasons.joinToString()} | debug=$lastDetectionDebug")
         }
 
@@ -805,6 +818,8 @@ class ScanViewModel(
         lastStateRefreshAtMs = 0L
         lastLiveScanResult = com.forest.scanai.edge.domain.model.ScanResult(0.0, emptyList())
         frameCounter = 0
+        replaySampleIndex = 0
+        lastReplayTickAtMs = 0L
     }
 
     private fun getDetectionSnapshot(
