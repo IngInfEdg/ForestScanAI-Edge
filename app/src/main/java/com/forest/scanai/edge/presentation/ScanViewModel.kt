@@ -116,6 +116,11 @@ class ScanViewModel(
         }
     }
 
+    private fun liveMinPilePointsThreshold(totalPoints: Int, observerSamples: Int): Int {
+        val isVeryEarlyStage = totalPoints < 500 || observerSamples < 8
+        return if (isVeryEarlyStage) 80 else 120
+    }
+
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
     }
@@ -467,12 +472,20 @@ class ScanViewModel(
         val measurementPoints = selectPilePreferredPoints(
             detection = detection,
             fallbackPoints = currentPoints,
-            minPilePoints = 80
+            minPilePoints = liveMinPilePointsThreshold(
+                totalPoints = currentPoints.size,
+                observerSamples = observerPath.size
+            )
         )
+
+        val liveSegmentedPoints = segmenter.segment(measurementPoints)
+            ?.pilePoints
+            ?.takeIf { it.isNotEmpty() }
+            ?: measurementPoints
 
         frameCounter++
         val calcResult = if (frameCounter % 2 == 0) {
-            calculator.calculate(measurementPoints).also { lastLiveScanResult = it }
+            calculator.calculate(liveSegmentedPoints).also { lastLiveScanResult = it }
         } else {
             lastLiveScanResult
         }
@@ -480,7 +493,8 @@ class ScanViewModel(
             "raw_points" to processor.lastStats.rawPoints.toString(),
             "sampled_points" to processor.lastStats.sampledPoints.toString(),
             "accepted_points_live" to processor.lastStats.acceptedPoints.toString(),
-            "measurement_points" to measurementPoints.size.toString()
+            "measurement_points" to measurementPoints.size.toString(),
+            "live_segmented_points" to liveSegmentedPoints.size.toString()
         )
 
         val rawDist = sqrt(
@@ -499,7 +513,7 @@ class ScanViewModel(
 
         volumeHistory.addLast(calcResult.volume)
         if (volumeHistory.size > 20) volumeHistory.removeFirst()
-        usefulPointHistory.addLast(measurementPoints.size)
+        usefulPointHistory.addLast(liveSegmentedPoints.size)
         if (usefulPointHistory.size > 20) usefulPointHistory.removeFirst()
 
         refreshMeasurementState()
