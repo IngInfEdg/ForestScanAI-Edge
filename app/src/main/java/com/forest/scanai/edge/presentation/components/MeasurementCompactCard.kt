@@ -69,7 +69,7 @@ fun MeasurementCompactCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             MetricItem(
-                label = "m³ Estéreo",
+                label = "m³ Estimado",
                 value = formatVolume(uiState.stereoVolume)
             )
 
