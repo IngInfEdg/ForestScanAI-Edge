@@ -12,9 +12,11 @@ import com.forest.scanai.edge.domain.engine.*
 import com.forest.scanai.edge.domain.model.*
 import com.forest.scanai.edge.presentation.state.ScanUiState
 import io.github.sceneview.math.Position
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -60,6 +62,7 @@ class ScanViewModel(
 
     private var startPos: Position? = null
     private var gpsJob: Job? = null
+    private var calculationJob: Job? = null
     private var lastStateRefreshAtMs = 0L
     private var lastLiveScanResult = ScanResult(0.0, emptyList())
     private var frameCounter = 0
@@ -113,7 +116,9 @@ class ScanViewModel(
 
     private fun stopMeasurement() {
         gpsJob?.cancel()
+        calculationJob?.cancel()
         val currentPoints = points.toList()
+        val liveSnapshot = lastLiveScanResult
 
         // 1. Detección y Segmentación final
         val detection = pileObjectDetector.detect(currentPoints, observerPath.toList())
@@ -123,19 +128,63 @@ class ScanViewModel(
         val refinedPilePoints = segmented?.pilePoints?.takeIf { it.isNotEmpty() } ?: primaryPilePoints
         val refinedGroundPoints = segmented?.groundPoints ?: detection.groundPoints
 
-        // 2. Evaluaciones de Calidad
-        val coverageResult = coverageEvaluator.evaluateFromObserverPath(observerPath.toList(), refinedPilePoints)
-        val verticalCoverage = verticalCoverageEvaluator.evaluate(refinedPilePoints, observerPath.toList(), topCoverageHistory.toList())
+        // 2. Cálculo de resultados potenciales
+        val resultRefined = calculator.calculate(refinedPilePoints)
+        val resultPrimary = calculator.calculate(primaryPilePoints)
+
+        // 3. Lógica de Fallback Segura
+        var finalVolumeResult = resultRefined
+        var finalPoints = refinedPilePoints
+        var chosenSource = "refinedPilePoints"
+        var fallbackReason: String? = null
+
+        val volumeDiffRatio = if (liveSnapshot.volume > 0.01) kotlin.math.abs(resultRefined.volume - liveSnapshot.volume) / liveSnapshot.volume else 0.0
+        
+        if (resultRefined.volume <= 0.01 || resultRefined.volume.isNaN() || volumeDiffRatio > 0.20 || detection.detectionConfidence <= 0.0f) {
+            if (resultPrimary.volume > 0.01 && !resultPrimary.volume.isNaN() && detection.detectionConfidence > 0.05f) {
+                finalVolumeResult = resultPrimary
+                finalPoints = primaryPilePoints
+                chosenSource = "primaryPilePointsFallback"
+            } else {
+                finalVolumeResult = liveSnapshot
+                finalPoints = currentPoints
+                chosenSource = "lastLiveScanResultFallback"
+            }
+            
+            fallbackReason = when {
+                resultRefined.volume <= 0.01 -> "Refined volume is zero"
+                resultRefined.volume.isNaN() -> "Refined volume is NaN"
+                volumeDiffRatio > 0.20 -> "High volume discrepancy (${(volumeDiffRatio*100).toInt()}%)"
+                else -> "Insufficient confidence"
+            }
+        }
+
+        // 4. Re-sincronización Geométrica Final
+        val finalSegmented = if (chosenSource == "refinedPilePoints") segmented else segmenter.segment(finalPoints)
+        val height = finalSegmented?.heightSummary
+        val reviewModel = finalSegmented?.let { reviewBuilder.build(it) }
+        val finalGroundPoints = finalSegmented?.groundPoints ?: refinedGroundPoints
+
+        // 5. Evaluaciones Finales
+        val coverageResult = coverageEvaluator.evaluateFromObserverPath(observerPath.toList(), finalPoints)
+        val verticalCoverage = verticalCoverageEvaluator.evaluate(finalPoints, observerPath.toList(), topCoverageHistory.toList())
         val trajectoryQuality = trajectoryQualityEvaluator.evaluate(observerPath = observerPath.toList())
         val volumeStability = volumeStabilityEvaluator.evaluate(volumeHistory.toList())
-
-        val gpsDistance = calculateGpsDistance()
         val arDistance = calculateArDistance()
+        val gpsDistance = calculateGpsDistance()
 
-        // 3. Validación de completitud y estado
+        val start = startPos
+        val maxRadialDisplacement = if (start != null && observerPath.isNotEmpty()) {
+            observerPath.maxOf { p ->
+                val dx = (p.x - start.x).toDouble()
+                val dz = (p.z - start.z).toDouble()
+                sqrt(dx * dx + dz * dz)
+            }
+        } else 0.0
+
         val completeness = completenessValidator.validate(
             coverageResult.coverageRatio, coverageResult.coveredSectors, observerPath.size,
-            refinedPilePoints.size, arDistance, gpsDistance
+            finalPoints.size, arDistance, gpsDistance, maxRadialDisplacement
         )
 
         val stateDecision = stateEvaluator.evaluate(
@@ -144,7 +193,7 @@ class ScanViewModel(
                 coverageRatio = coverageResult.coverageRatio,
                 coveredSectors = coverageResult.coveredSectors,
                 observerSamples = observerPath.size,
-                usefulPointCount = refinedPilePoints.size,
+                usefulPointCount = finalPoints.size,
                 trajectoryQualityScore = trajectoryQuality.trajectoryQualityScore,
                 hasTrajectoryInstability = TrajectoryPenalty.LOW_KINEMATIC_CONSISTENCY in trajectoryQuality.penaltyFlags,
                 verticalCoverageScore = verticalCoverage.verticalCoverageScore,
@@ -158,23 +207,19 @@ class ScanViewModel(
                 topCoverageState = verticalCoverage.topCoverageState,
                 recentUsefulPointGrowthRatio = computeRecentUsefulPointGrowthRatio(),
                 recentVolumeDeltaRatio = computeRecentVolumeDeltaRatio(),
-                hasUsableDetection = detection.isRobust || detection.pilePoints.size >= 120,
-                hasReviewableModel = refinedPilePoints.size >= 600
+                hasUsableDetection = detection.isRobust || finalPoints.size >= 120,
+                hasReviewableModel = finalPoints.size >= 600
             )
         )
 
-        // 4. Cálculo final de volumen
-        val result = calculator.calculate(refinedPilePoints)
-        val reviewModel = segmented?.let { reviewBuilder.build(it) }
-
-        // 5. Construir Resultado Final
+        // 6. Construcción Resultado Final
         _finalResult.value = ScanSessionResult(
-            volume = result.volume,
+            volume = finalVolumeResult.volume,
             length = detection.boundingBox?.length?.toDouble() ?: 0.0,
-            maxHeight = segmented?.heightSummary?.maxHeight ?: 0.0,
+            maxHeight = height?.maxHeight ?: 0.0,
             maxWidth = detection.boundingBox?.width?.toDouble() ?: 0.0,
             points = currentPoints,
-            topPoints = result.topPoints,
+            topPoints = finalVolumeResult.topPoints,
             trajectory = trajectory.toList(),
             observerPath = observerPath.toList(),
             coverage = coverageResult.coverageRatio,
@@ -188,10 +233,33 @@ class ScanViewModel(
             totalSectors = coverageResult.totalSectors,
             missingSectors = coverageResult.missingSectors,
             guidanceSummary = stateDecision.shortGuidance,
-            groundPoints = refinedGroundPoints,
-            pileOnlyPoints = refinedPilePoints,
+            groundPoints = finalGroundPoints,
+            pileOnlyPoints = finalPoints,
+            groundReference = height?.groundReference ?: 0.0,
+            pileBaseReference = height?.pileBaseReference ?: 0.0,
+            meanPileHeight = height?.meanHeight ?: 0.0,
+            p95PileHeight = height?.p95Height ?: 0.0,
             reviewModelPoints = reviewModel?.points ?: emptyList(),
-            appVersionDisplay = appVersionDisplay
+            reviewModelWidth = reviewModel?.width ?: 0f,
+            reviewModelHeight = reviewModel?.height ?: 0f,
+            reviewModelDepth = reviewModel?.depth ?: 0f,
+            pileDetectionConfidence = detection.detectionConfidence,
+            pileDetectionQuality = if (fallbackReason != null) "FALLBACK" else detection.quality.name,
+            pileDetectionReasons = detection.reasons,
+            geometricVolumeRaw = finalVolumeResult.geometricVolumeRaw,
+            geometricVolumeCorrected = finalVolumeResult.geometricVolumeCorrected,
+            stereoVolumeSmoothed = finalVolumeResult.stereoVolumeSmoothed,
+            netVolumeEstimate = finalVolumeResult.netVolumeEstimate,
+            appVersionName = appVersionName,
+            appVersionCode = appVersionCode,
+            appVersionDisplay = appVersionDisplay,
+            detectionDebugInfo = mapOf(
+                "liveVolumeAtStop" to liveSnapshot.volume.toString(),
+                "refinedVolume" to resultRefined.volume.toString(),
+                "chosenSource" to chosenSource,
+                "fallbackReason" to (fallbackReason ?: "None"),
+                "maxRadialDisplacement" to maxRadialDisplacement.toString()
+            )
         )
 
         _uiState.update {
@@ -215,7 +283,7 @@ class ScanViewModel(
         val currentPos = Position(cameraPose.tx(), cameraPose.ty(), cameraPose.tz())
         if (startPos == null) startPos = currentPos
 
-        if (observerPath.isEmpty() || distanceBetween(observerPath.last(), currentPos) > 0.25) {
+        if (observerPath.isEmpty() || distanceBetween(observerPath.last(), currentPos) > 0.35) {
             observerPath.add(currentPos)
         }
 
@@ -223,32 +291,71 @@ class ScanViewModel(
         if (newPoints.isNotEmpty()) {
             points.addAll(newPoints)
 
-            // Cálculo de volumen en tiempo real
             frameCounter++
-            if (frameCounter % 5 == 0) {
-                val calcResult = calculator.calculate(points.toList())
-                _uiState.update {
-                    it.copy(
-                        metrics = it.metrics.copy(
-                            stereoVolume = calcResult.volume,
-                            netVolume = calcResult.netVolumeEstimate,
-                            topPoints = calcResult.topPoints
-                        )
-                    )
+            // Cálculo asíncrono y muestreado cada 20 frames
+            if (frameCounter % 20 == 0 && calculationJob?.isActive != true) {
+                val currentPointsSnapshot = points.toList()
+                val currentPathSnapshot = observerPath.toList()
+                
+                calculationJob = viewModelScope.launch(Dispatchers.Default) {
+                    performLiveCalculation(currentPointsSnapshot, currentPathSnapshot)
                 }
-
-                volumeHistory.addLast(calcResult.volume)
-                if (volumeHistory.size > 20) volumeHistory.removeFirst()
-                usefulPointHistory.addLast(points.size)
-                if (usefulPointHistory.size > 20) usefulPointHistory.removeFirst()
             }
         }
 
+        val start = startPos
+        val currentNetDisplacement = if (start != null) {
+            val dx = (currentPos.x - start.x).toDouble()
+            val dz = (currentPos.z - start.z).toDouble()
+            sqrt(dx * dx + dz * dz)
+        } else 0.0
+
         val rawDist = sqrt((currentPos.x - startPos!!.x).toDouble().pow(2.0) + (currentPos.z - startPos!!.z).toDouble().pow(2.0))
         _uiState.update {
-            it.copy(metrics = it.metrics.copy(distance = rawDist))
+            it.copy(metrics = it.metrics.copy(
+                distance = rawDist,
+                maxRadialDisplacement = maxOf(it.metrics.maxRadialDisplacement, currentNetDisplacement)
+            ))
         }
         refreshMeasurementState()
+    }
+
+    private suspend fun performLiveCalculation(allPoints: List<Position>, path: List<Position>) {
+        if (allPoints.size < 100) return
+
+        // MUESTREO: Usamos cada 3er punto si hay demasiados para mantener fluidez
+        val sampledPoints = if (allPoints.size > 5000) {
+            allPoints.filterIndexed { index, _ -> index % 3 == 0 }
+        } else allPoints
+
+        // Detección para alinear con lógica final
+        val detectionLive = pileObjectDetector.detect(sampledPoints, path)
+        val livePrimaryPoints = if (detectionLive.pilePoints.size >= 80) detectionLive.pilePoints else sampledPoints
+        
+        // Alineación periódica con el segmentador (cada ~3 segs)
+        val processedPoints = if (frameCounter % 60 == 0) {
+            segmenter.segment(livePrimaryPoints)?.pilePoints ?: livePrimaryPoints
+        } else livePrimaryPoints
+
+        val calcResult = calculator.calculate(processedPoints)
+        lastLiveScanResult = calcResult 
+        
+        _uiState.update {
+            it.copy(
+                metrics = it.metrics.copy(
+                    stereoVolume = calcResult.volume,
+                    netVolume = calcResult.netVolumeEstimate,
+                    topPoints = calcResult.topPoints
+                )
+            )
+        }
+
+        withContext(Dispatchers.Main) {
+            volumeHistory.addLast(calcResult.volume)
+            if (volumeHistory.size > 20) volumeHistory.removeFirst()
+            usefulPointHistory.addLast(processedPoints.size)
+            if (usefulPointHistory.size > 20) usefulPointHistory.removeFirst()
+        }
     }
 
     private fun refreshMeasurementState(force: Boolean = false) {
@@ -267,7 +374,7 @@ class ScanViewModel(
 
         val completeness = completenessValidator.validate(
             coverageResult.coverageRatio, coverageResult.coveredSectors, observerPath.size,
-            currentPoints.size, arDistance, gpsDistance
+            currentPoints.size, arDistance, gpsDistance, _uiState.value.metrics.maxRadialDisplacement
         )
 
         val guidance = guidanceEngine.buildMessage(
@@ -310,6 +417,7 @@ class ScanViewModel(
         _uiState.update { ScanUiState(metrics = ScanMetrics(appVersionDisplay = appVersionDisplay)) }
         _finalResult.value = null
         gpsJob?.cancel()
+        calculationJob?.cancel()
         startPos = null
     }
 }

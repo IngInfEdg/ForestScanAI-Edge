@@ -11,6 +11,7 @@ data class ScanMetrics(
     val stereoVolume: Double = 0.0,
     val netVolume: Double = 0.0,
     val distance: Double = 0.0,
+    val maxRadialDisplacement: Double = 0.0, // Nueva métrica para evitar completitud por jitter
     val trackingState: TrackingState = TrackingState.PAUSED,
     val coveragePercentage: Float = 0f,
     val topPoints: List<Position> = emptyList(),
