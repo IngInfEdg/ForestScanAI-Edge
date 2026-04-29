@@ -28,6 +28,7 @@ import com.forest.scanai.edge.domain.engine.VolumeCalculator
 import com.forest.scanai.edge.domain.engine.VolumeStabilityEvaluator
 import com.forest.scanai.edge.domain.engine.TrajectoryPenalty
 import com.forest.scanai.edge.domain.model.CompletenessLevel
+import com.forest.scanai.edge.domain.model.MeasurementSourceMode
 import com.forest.scanai.edge.domain.model.ReferenceObject
 import com.forest.scanai.edge.domain.model.ReferenceObjectType
 import com.forest.scanai.edge.domain.model.ScanSessionResult
@@ -65,6 +66,8 @@ class ScanViewModel(
     private val appVersionCode: Long = 0L,
     private val appVersionDisplay: String = ""
 ) : ViewModel() {
+    var measurementSourceMode: MeasurementSourceMode = MeasurementSourceMode.LIVE
+        private set
     private val segmenter: GroundPileSegmenter = GroundPileSegmenter(axisEstimator)
     private val reviewBuilder: PointCloudReviewModelBuilder = PointCloudReviewModelBuilder()
 
@@ -123,6 +126,10 @@ class ScanViewModel(
 
     fun toggleMeasuring() {
         if (!_uiState.value.isMeasuring) startMeasurement() else stopMeasurement()
+    }
+
+    fun setMeasurementSourceMode(mode: MeasurementSourceMode) {
+        measurementSourceMode = mode
     }
 
     private fun startMeasurement() {
@@ -464,7 +471,11 @@ class ScanViewModel(
             observerPath.add(currentPos)
         }
 
-        val newPoints = processor.extractFilteredPoints(frame, currentPos, voxelGrid)
+        val newPoints = if (measurementSourceMode == MeasurementSourceMode.REPLAY) {
+            generateDeterministicReplayPoints(observerPath.size)
+        } else {
+            processor.extractFilteredPoints(frame, currentPos, voxelGrid)
+        }
         if (newPoints.isNotEmpty()) points.addAll(newPoints)
 
         val currentPoints = points.toList()
@@ -517,6 +528,21 @@ class ScanViewModel(
         if (usefulPointHistory.size > 20) usefulPointHistory.removeFirst()
 
         refreshMeasurementState()
+    }
+
+    private fun generateDeterministicReplayPoints(sampleIndex: Int): List<Position> {
+        val centerX = 0f
+        val centerZ = 0f
+        val radius = 2.8f
+        val steps = 36
+        val angle = (sampleIndex % steps) * (2.0 * Math.PI / steps)
+        val baseX = centerX + (radius * kotlin.math.cos(angle)).toFloat()
+        val baseZ = centerZ + (radius * kotlin.math.sin(angle)).toFloat()
+        return (0 until 40).map { i ->
+            val h = 0.15f + (i % 10) * 0.18f
+            val offset = ((i % 4) - 1.5f) * 0.05f
+            Position(baseX + offset, h, baseZ - offset)
+        }
     }
 
     private fun refreshMeasurementState(force: Boolean = false) {
