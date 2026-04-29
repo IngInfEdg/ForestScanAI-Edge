@@ -35,6 +35,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.forest.scanai.edge.core.projectPointToScreen
 import com.forest.scanai.edge.domain.model.ScanSessionResult
 import com.forest.scanai.edge.domain.model.ScanUiState
+import com.forest.scanai.edge.domain.model.MeasurementSourceMode
 import androidx.compose.ui.text.font.FontWeight
 import com.forest.scanai.edge.presentation.ScanViewModel
 import com.forest.scanai.edge.presentation.components.MeasurementCompactCard
@@ -157,6 +158,23 @@ fun ScanScreen(
             }
 
             if (finalResult == null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(bottom = 10.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.setMeasurementSourceMode(MeasurementSourceMode.LIVE) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (viewModel.measurementSourceMode == MeasurementSourceMode.LIVE) Color(0xFF1565C0) else Color.DarkGray
+                        )
+                    ) { Text("LIVE") }
+                    Button(
+                        onClick = { viewModel.setMeasurementSourceMode(MeasurementSourceMode.REPLAY) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (viewModel.measurementSourceMode == MeasurementSourceMode.REPLAY) Color(0xFF6A1B9A) else Color.DarkGray
+                        )
+                    ) { Text("REPLAY") }
+                }
                 if (!uiState.isMeasuring) {
                     Button(
                         onClick = { viewModel.toggleMeasuring() },

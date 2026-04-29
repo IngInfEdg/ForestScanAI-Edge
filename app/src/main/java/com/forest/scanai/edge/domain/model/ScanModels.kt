@@ -46,3 +46,8 @@ data class ScanResult(
 enum class CompletenessLevel {
     INSUFFICIENT, PARTIAL, ACCEPTABLE, COMPLETE
 }
+
+enum class MeasurementSourceMode {
+    LIVE,
+    REPLAY
+}
