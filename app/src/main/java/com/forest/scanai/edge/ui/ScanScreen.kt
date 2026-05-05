@@ -200,7 +200,7 @@ fun ScanScreen(
 
                         Button(
                             onClick = { onRequestSaveCsv(uiState, finalResult) },
-                            enabled = uiState.stereoVolume > 0,
+                            enabled = uiState.canReviewMeasurement || uiState.canFinishMeasurement,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C))
                         ) {
                             Text("Guardar CSV")
@@ -319,7 +319,7 @@ private fun ResultOverlay(
         )
 
         Text(
-            text = "m³ Estéreo: ${formatDouble(result.volume)}  •  m³ Neto: ${formatDouble(result.volume * 0.45)}",
+            text = "m³ Estéreo: ${formatDouble(result.volume)}  •  m³ Neto: ${formatDouble(result.netVolumeEstimate)}",
             color = Color(0xFF35D07F),
             style = MaterialTheme.typography.bodyLarge
         )
