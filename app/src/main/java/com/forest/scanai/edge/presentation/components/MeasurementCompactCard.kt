@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
@@ -64,21 +63,6 @@ fun MeasurementCompactCard(
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            MetricItem(
-                label = "m³ Estimado",
-                value = formatVolume(uiState.stereoVolume)
-            )
-
-            MetricItem(
-                label = "m³ Neto",
-                value = formatVolume(uiState.netVolume)
-            )
-        }
-
         Text(
             text = "Cobertura: ${formatPercent(uiState.coveragePercentage)}%",
             color = Color(0xFF00E5FF),
@@ -119,26 +103,6 @@ fun MeasurementCompactCard(
     }
 }
 
-@Composable
-private fun MetricItem(
-    label: String,
-    value: String
-) {
-    Column {
-        Text(
-            text = label,
-            color = Color(0xFFB0BEC5),
-            style = MaterialTheme.typography.labelMedium
-        )
-        Text(
-            text = value,
-            color = Color.White,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
 private fun completenessText(level: CompletenessLevel): String {
     return when (level) {
         CompletenessLevel.INSUFFICIENT -> "Insuficiente"
@@ -148,9 +112,6 @@ private fun completenessText(level: CompletenessLevel): String {
     }
 }
 
-private fun formatVolume(value: Double): String {
-    return String.format(Locale.US, "%.2f", value)
-}
 
 private fun formatPercent(value: Float): String {
     return String.format(Locale.US, "%.0f", value * 100f)
