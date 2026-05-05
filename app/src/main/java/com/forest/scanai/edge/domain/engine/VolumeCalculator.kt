@@ -18,6 +18,10 @@ class VolumeCalculator(
     private val maxTemporalOvershootRatio = 1.08
     private val minTemporalUndershootRatio = 0.85
 
+    fun resetTemporalState() {
+        lastCalculatedVolume = 0.0
+    }
+
     private data class ProjectedPoint(
         val source: Position,
         val along: Float,

@@ -104,6 +104,15 @@ class ScanViewModel(
         label = "Barra de referencia 2m"
     )
     private var manualReferenceObservedLengthMeters: Double? = null
+    private val volumeMinPilePointsThreshold = 120
+
+    private data class VolumePipelinePoints(
+        val source: String,
+        val selectedPoints: List<Position>,
+        val segmentedPilePoints: List<Position>,
+        val groundPoints: List<Position>,
+        val detection: com.forest.scanai.edge.domain.engine.PileDetectionResult
+    )
 
     fun setManualReferenceBarObservation(observedLengthMeters: Double?) {
         manualReferenceObservedLengthMeters = observedLengthMeters?.takeIf { it > 0.0 }
@@ -124,6 +133,33 @@ class ScanViewModel(
     private fun liveMinPilePointsThreshold(totalPoints: Int, observerSamples: Int): Int {
         val isVeryEarlyStage = totalPoints < 500 || observerSamples < 8
         return if (isVeryEarlyStage) 80 else 120
+    }
+
+    private fun buildVolumeInputPoints(
+        pointsSnapshot: List<Position>,
+        observerSnapshot: List<Position>,
+        forceDetection: Boolean
+    ): VolumePipelinePoints {
+        val detection = getDetectionSnapshot(pointsSnapshot, observerSnapshot, force = forceDetection)
+        val selectedPoints = selectPilePreferredPoints(
+            detection = detection,
+            fallbackPoints = pointsSnapshot,
+            minPilePoints = volumeMinPilePointsThreshold
+        )
+        val segmented = segmenter.segment(selectedPoints)
+        val segmentedPilePoints = segmented?.pilePoints?.takeIf { it.isNotEmpty() } ?: selectedPoints
+        val source = when {
+            segmented?.pilePoints?.isNotEmpty() == true -> "detection_segmented_pile"
+            detection.pilePoints.size >= volumeMinPilePointsThreshold -> "detection_pile_fallback_no_segment"
+            else -> "raw_points_fallback_segmented"
+        }
+        return VolumePipelinePoints(
+            source = source,
+            selectedPoints = selectedPoints,
+            segmentedPilePoints = segmentedPilePoints,
+            groundPoints = segmented?.groundPoints ?: detection.groundPoints,
+            detection = detection
+        )
     }
 
     fun toggleMeasuring() {
@@ -161,17 +197,14 @@ class ScanViewModel(
         gpsJob?.cancel()
 
         val currentPoints = points.toList()
-        val detection = getDetectionSnapshot(currentPoints, observerPath.toList(), force = true)
-        val primaryPilePoints = selectPilePreferredPoints(
-            detection = detection,
-            fallbackPoints = currentPoints,
-            minPilePoints = 120
+        val volumePipeline = buildVolumeInputPoints(
+            pointsSnapshot = currentPoints,
+            observerSnapshot = observerPath.toList(),
+            forceDetection = true
         )
-
-        // Refinador opcional: GroundPileSegmenter queda como fallback para mejorar visualización 3D.
-        val segmented = segmenter.segment(primaryPilePoints)
-        val refinedPilePoints = segmented?.pilePoints?.takeIf { it.isNotEmpty() } ?: primaryPilePoints
-        val refinedGroundPoints = segmented?.groundPoints ?: detection.groundPoints
+        val detection = volumePipeline.detection
+        val refinedPilePoints = volumePipeline.segmentedPilePoints
+        val refinedGroundPoints = volumePipeline.groundPoints
 
         val coverageResult = coverageEvaluator.evaluateFromObserverPath(
             observerPath = observerPath.toList(),
@@ -290,12 +323,14 @@ class ScanViewModel(
             return
         }
 
+        calculator.resetTemporalState()
         val result = calculator.calculate(refinedPilePoints)
         val axisResult = axisEstimator.estimate(refinedPilePoints)
         val cloudQuality = pileCoverageQualityEvaluator.evaluate(refinedPilePoints)
 
-        val reviewModel = segmented?.let { reviewBuilder.build(it) }
-        val heightSummary = segmented?.heightSummary
+        val segmentedForReview = segmenter.segment(refinedPilePoints)
+        val reviewModel = segmentedForReview?.let { reviewBuilder.build(it) }
+        val heightSummary = segmentedForReview?.heightSummary
 
         val maxHeight = heightSummary?.maxHeight
             ?: detection.boundingBox?.height?.toDouble()
@@ -356,6 +391,11 @@ class ScanViewModel(
             "accepted_points" to currentPoints.size.toString(),
             "pile_points" to refinedPilePoints.size.toString(),
             "ground_points" to refinedGroundPoints.size.toString(),
+            "volume_pipeline_source" to volumePipeline.source,
+            "live_last_volume" to String.format("%.3f", lastLiveScanResult.volume),
+            "final_volume" to String.format("%.3f", result.volume),
+            "final_points_count" to refinedPilePoints.size.toString(),
+            "calculator_reset_applied" to "true",
             "bounding_box_final" to formatBounds(finalBoundingBox),
             "max_height" to String.format("%.3f", maxHeight),
             "p95_height" to String.format("%.3f", heightSummary?.p95Height ?: maxHeight),
@@ -486,24 +526,13 @@ class ScanViewModel(
         if (newPoints.isNotEmpty()) points.addAll(newPoints)
 
         val currentPoints = points.toList()
-        val detection = getDetectionSnapshot(currentPoints, observerPath.toList())
-        val measurementPoints = selectPilePreferredPoints(
-            detection = detection,
-            fallbackPoints = currentPoints,
-            minPilePoints = liveMinPilePointsThreshold(
-                totalPoints = currentPoints.size,
-                observerSamples = observerPath.size
-            )
+        val volumePipeline = buildVolumeInputPoints(
+            pointsSnapshot = currentPoints,
+            observerSnapshot = observerPath.toList(),
+            forceDetection = false
         )
-
-        val liveSegmentedPoints = if (isReplayMode) {
-            measurementPoints
-        } else {
-            segmenter.segment(measurementPoints)
-                ?.pilePoints
-                ?.takeIf { it.isNotEmpty() }
-                ?: measurementPoints
-        }
+        val detection = volumePipeline.detection
+        val liveSegmentedPoints = volumePipeline.segmentedPilePoints
 
         frameCounter++
         val calculationStride = if (isReplayMode) 4 else 2
@@ -516,8 +545,11 @@ class ScanViewModel(
             "raw_points" to processor.lastStats.rawPoints.toString(),
             "sampled_points" to processor.lastStats.sampledPoints.toString(),
             "accepted_points_live" to processor.lastStats.acceptedPoints.toString(),
-            "measurement_points" to measurementPoints.size.toString(),
-            "live_segmented_points" to liveSegmentedPoints.size.toString()
+            "measurement_points" to volumePipeline.selectedPoints.size.toString(),
+            "live_segmented_points" to liveSegmentedPoints.size.toString(),
+            "volume_pipeline_source" to volumePipeline.source,
+            "live_points_count" to liveSegmentedPoints.size.toString(),
+            "live_last_volume" to String.format("%.3f", calcResult.volume)
         )
 
         val rawDist = sqrt(
